@@ -18,4 +18,24 @@ SETTINGS_TAG = "S"
 ROOT_DIR = Path(__file__).resolve().parents[2]
 DEFAULT_IDACLANG = ROOT_DIR / "tools" / "idaclang" / "idaclang.exe"
 
+# Common parser target triples shown in the UI. The empty string keeps the
+# field optional and causes no -target flag to be emitted.
+COMMON_TARGETS = [
+    "",
+    "x86_64-pc-windows-msvc",
+    "i686-pc-windows-msvc",
+    "aarch64-pc-windows-msvc",
+    "thumbv7a-pc-windows-msvc",
+]
+
+# Common source languages shown in the UI. The empty string keeps the field
+# optional and causes no -x flag to be emitted.
+COMMON_LANGUAGES = [
+    "",
+    "c",
+    "c++",
+    "objective-c",
+    "objective-c++",
+]
+
 

@@ -7,7 +7,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import ida_kernwin
 from PySide6 import QtCore, QtWidgets
 
-from .config import DEFAULT_IDACLANG, PLUGIN_NAME
+from .config import COMMON_LANGUAGES, COMMON_TARGETS, DEFAULT_IDACLANG, PLUGIN_NAME
 from .manager import ClangIncludeManager
 from .model import Profile
 from .options import OptionsDialog
@@ -71,29 +71,29 @@ This is only used when Engine is set to External or when Auto falls back from th
 Auto tries the preferred engine order from Options and falls back if the first engine fails. API uses IDA's in-process source parser only. External runs idaclang.exe and loads the generated types."""
         self._set_help(engine_combo, engine_help)
 
-        target_edit = QtWidgets.QLineEdit()
-        language_edit = QtWidgets.QLineEdit()
+        target_combo = self._make_editable_combo(COMMON_TARGETS)
+        language_combo = self._make_editable_combo(COMMON_LANGUAGES)
         standard_edit = QtWidgets.QLineEdit()
-        target_edit.setPlaceholderText("i686-pc-windows-msvc")
-        language_edit.setPlaceholderText("c++")
-        standard_edit.setPlaceholderText("c++17")
+        target_combo.lineEdit().setPlaceholderText("Optional target triple")
+        language_combo.lineEdit().setPlaceholderText("Optional language")
+        standard_edit.setPlaceholderText("Optional standard, e.g. c11 or c++20")
         self._set_help(
-            target_edit,
-            """Target triple passed to the parser, for example i686-pc-windows-msvc or x86_64-pc-windows-msvc.
+            target_combo,
+            """Optional target triple passed to the parser, for example i686-pc-windows-msvc or x86_64-pc-windows-msvc.
 
-This controls ABI-sensitive layout decisions such as calling conventions, builtin type sizes, and some compiler defaults."""
+Leave it empty to omit -target entirely. This controls ABI-sensitive layout decisions such as calling conventions, builtin type sizes, and some compiler defaults."""
         )
         self._set_help(
-            language_edit,
-            """Source language passed with -x, such as c++ or c.
+            language_combo,
+            """Optional source language passed with -x, such as c++ or c.
 
-Use this when your header should be parsed as plain C instead of C++. The API parser selection also follows this field."""
+Leave it empty to omit -x. The API parser still defaults to C++ internally when no language is given, but the external command preview and parser argv will not include -x unless you set one."""
         )
         self._set_help(
             standard_edit,
-            """Language standard passed to the parser, for example c++17, c++20, or c11.
+            """Optional language standard passed to the parser, for example c++17, c++20, or c11.
 
-Change this if the header depends on syntax or library behavior from a specific language version."""
+Leave it empty to omit -std entirely. Change this if the header depends on syntax or library behavior from a specific language version."""
         )
 
         includes_edit = self._make_large_editor("One include path per line")
@@ -177,9 +177,9 @@ This shows status messages, parser execution details, overwrite/skip decisions, 
         settings_layout.addWidget(engine_label, 2, 0)
         settings_layout.addWidget(engine_combo, 2, 1)
         settings_layout.addWidget(target_label, 2, 2)
-        settings_layout.addWidget(target_edit, 2, 3)
+        settings_layout.addWidget(target_combo, 2, 3)
         settings_layout.addWidget(language_label, 3, 0)
-        settings_layout.addWidget(language_edit, 3, 1)
+        settings_layout.addWidget(language_combo, 3, 1)
         settings_layout.addWidget(standard_label, 3, 2)
         settings_layout.addWidget(standard_edit, 3, 3)
 
@@ -240,8 +240,8 @@ This shows status messages, parser execution details, overwrite/skip decisions, 
             "header_path": header_edit,
             "idaclang_path": idaclang_edit,
             "engine": engine_combo,
-            "target": target_edit,
-            "language": language_edit,
+            "target": target_combo,
+            "language": language_combo,
             "standard": standard_edit,
             "include_paths": includes_edit,
             "macros": macros_edit,
@@ -261,8 +261,10 @@ This shows status messages, parser execution details, overwrite/skip decisions, 
         import_button.clicked.connect(self._run_sync)
         clear_log_button.clicked.connect(log_edit.clear)
 
-        for key in ("header_path", "idaclang_path", "target", "language", "standard"):
+        for key in ("header_path", "idaclang_path", "standard"):
             self._widgets[key].textChanged.connect(self._refresh_preview)
+        for key in ("target", "language"):
+            self._widgets[key].currentTextChanged.connect(self._refresh_preview)
         for key in ("include_paths", "macros", "extra_args", "raw_argv"):
             self._widgets[key].textChanged.connect(self._refresh_preview)
         engine_combo.currentIndexChanged.connect(self._refresh_preview)
@@ -283,6 +285,15 @@ This shows status messages, parser execution details, overwrite/skip decisions, 
         )
         editor.setMinimumHeight(220)
         return editor
+
+    def _make_editable_combo(self, items: List[str]) -> QtWidgets.QComboBox:
+        """Create an editable combo box with optional predefined values."""
+
+        combo = QtWidgets.QComboBox()
+        combo.setEditable(True)
+        combo.setInsertPolicy(QtWidgets.QComboBox.NoInsert)
+        combo.addItems(items)
+        return combo
 
     def _path_row(
         self,
@@ -320,8 +331,8 @@ This shows status messages, parser execution details, overwrite/skip decisions, 
 
         self._widgets["header_path"].setText(profile.header_path)
         self._widgets["idaclang_path"].setText(profile.idaclang_path)
-        self._widgets["target"].setText(profile.target)
-        self._widgets["language"].setText(profile.language)
+        self._widgets["target"].setCurrentText(profile.target)
+        self._widgets["language"].setCurrentText(profile.language)
         self._widgets["standard"].setText(profile.standard)
         self._widgets["include_paths"].setPlainText("\n".join(profile.include_paths))
         self._widgets["macros"].setPlainText("\n".join(profile.macros))
@@ -340,9 +351,9 @@ This shows status messages, parser execution details, overwrite/skip decisions, 
             header_path=self._widgets["header_path"].text().strip(),
             idaclang_path=self._widgets["idaclang_path"].text().strip()
             or str(DEFAULT_IDACLANG),
-            target=self._widgets["target"].text().strip(),
-            language=self._widgets["language"].text().strip() or "c++",
-            standard=self._widgets["standard"].text().strip() or "c++17",
+            target=self._widgets["target"].currentText().strip(),
+            language=self._widgets["language"].currentText().strip(),
+            standard=self._widgets["standard"].text().strip(),
             include_paths=self._split_lines(
                 self._widgets["include_paths"].toPlainText()
             ),

@@ -99,7 +99,7 @@ class ClangIncludeManager(QtCore.QObject):
             profile.idaclang_path or str(DEFAULT_IDACLANG),
             *args,
             "--idaclang-tilname",
-            "<managed-temp.til>",
+            str(self._external_temp_til_path()),
             profile.header_path,
         ]
         return subprocess.list2cmdline(full)
@@ -173,8 +173,8 @@ class ClangIncludeManager(QtCore.QObject):
         args: List[str] = []
         if profile.target.strip():
             args.extend(["-target", profile.target.strip()])
-        language = profile.language.strip() or "c++"
-        args.extend(["-x", language])
+        if profile.language.strip():
+            args.extend(["-x", profile.language.strip()])
         if profile.standard.strip():
             args.append(f"-std={profile.standard.strip()}")
         for include_path in profile.include_paths:
@@ -244,8 +244,11 @@ class ClangIncludeManager(QtCore.QObject):
         """Run external idaclang.exe and load the generated temporary TIL."""
 
         args = self._build_parser_args(profile)
-        with tempfile.TemporaryDirectory(prefix="type_sync_") as temp_dir:
-            temp_til_path = Path(temp_dir) / "type_sync.til"
+        temp_til_path = self._external_temp_til_path()
+        temp_til_path.parent.mkdir(parents=True, exist_ok=True)
+        if temp_til_path.exists():
+            temp_til_path.unlink()
+        try:
             command = [
                 profile.idaclang_path,
                 *args,
@@ -279,6 +282,17 @@ class ClangIncludeManager(QtCore.QObject):
             if not temp_til:
                 raise ClangIncludeError(f"Failed to load generated TIL: {temp_til_path}")
             return temp_til
+        finally:
+            try:
+                if temp_til_path.exists():
+                    temp_til_path.unlink()
+            except Exception:
+                pass
+
+    def _external_temp_til_path(self) -> Path:
+        """Return the concrete temporary .til path used by external parsing."""
+
+        return Path(tempfile.gettempdir()) / "ida-clang-include" / "managed-temp.til"
 
     def _apply_managed_types(
         self,
@@ -370,16 +384,19 @@ class ClangIncludeManager(QtCore.QObject):
         name: str,
         replace: bool,
     ) -> None:
-        """Create or replace one named type in the target type library."""
+        """Create or replace one named type in the target type library.
 
-        flags = ida_typeinf.NTF_TYPE
-        if replace:
-            flags |= ida_typeinf.NTF_REPLACE
+        `set_named_type()` copies a single named handle and has been observed to
+        lose the underlying type graph when moving parsed declarations from a
+        temporary TIL into `idati`. `import_type()` is the graph-aware primitive
+        IDA exposes for this job and brings along dependencies.
+        """
 
-        code = tif.set_named_type(target_til, name, flags)
-        if code != ida_typeinf.TERR_OK:
+        if replace and self._type_exists(target_til, name):
+            ida_typeinf.del_named_type(target_til, name, ida_typeinf.NTF_TYPE)
+
+        imported_tif = target_til.import_type(tif)
+        if not imported_tif:
             action = "replace" if replace else "create"
-            raise ClangIncludeError(
-                f"Failed to {action} type {name}: {ida_typeinf.tinfo_errstr(code)}"
-            )
+            raise ClangIncludeError(f"Failed to {action} type {name}: import_type")
 

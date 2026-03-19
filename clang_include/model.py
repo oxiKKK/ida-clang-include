@@ -23,8 +23,8 @@ class Profile:
     header_path: str = ""
     idaclang_path: str = str(DEFAULT_IDACLANG)
     target: str = ""
-    language: str = "c++"
-    standard: str = "c++17"
+    language: str = ""
+    standard: str = ""
     include_paths: List[str] = None
     macros: List[str] = None
     extra_args: str = ""
