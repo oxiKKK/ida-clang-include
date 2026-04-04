@@ -8,6 +8,7 @@ import ida_kernwin
 from PySide6 import QtCore, QtWidgets
 
 from .config import COMMON_LANGUAGES, COMMON_TARGETS, DEFAULT_IDACLANG, PLUGIN_NAME
+from .diff import SyncDiffDialog
 from .manager import ClangIncludeManager
 from .model import Profile
 from .options import OptionsDialog
@@ -409,16 +410,32 @@ This shows status messages, parser execution details, overwrite/skip decisions, 
         """Execute one parse/import cycle from the current form values."""
 
         profile = self._collect_profile()
+        prepared = None
         try:
             if profile.clear_log_before_import:
                 self._widgets["log"].clear()
 
-            # Parsing large SDK-style include graphs can take noticeable time,
-            # so keep the user informed while the current run is active.
             ida_kernwin.show_wait_box(
-                "HIDECANCEL\nClang Include: parsing and importing types..."
+                "HIDECANCEL\nClang Include: parsing headers and preparing change preview..."
             )
-            result = self.manager.sync(profile)
+            prepared = self.manager.prepare_sync(profile)
+        except Exception as exc:
+            self._append_log(traceback.format_exc())
+            ida_kernwin.warning(str(exc))
+            return
+        finally:
+            ida_kernwin.hide_wait_box()
+
+        try:
+            dialog = SyncDiffDialog(prepared.plan, self.parent)
+            if dialog.exec() != QtWidgets.QDialog.Accepted:
+                self.manager.log("Import canceled from change preview dialog.")
+                return
+
+            ida_kernwin.show_wait_box(
+                "HIDECANCEL\nClang Include: applying previewed Local Types changes..."
+            )
+            result = self.manager.apply_prepared_sync(profile, prepared)
             self._widgets["status"].setText(
                 f"Last import used {result.engine}. Managed types: {len(result.type_names)}"
             )
@@ -430,6 +447,7 @@ This shows status messages, parser execution details, overwrite/skip decisions, 
             self._append_log(traceback.format_exc())
             ida_kernwin.warning(str(exc))
         finally:
+            self.manager.release_prepared_sync(prepared)
             ida_kernwin.hide_wait_box()
             self._refresh_preview()
 

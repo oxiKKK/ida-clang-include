@@ -2,8 +2,9 @@
 
 import subprocess
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, List, Sequence
+from typing import Any, List, Optional, Sequence
 
 import ida_auto
 import ida_kernwin
@@ -28,6 +29,35 @@ class SyncResult:
     def __init__(self, engine: str, type_names: Sequence[str]) -> None:
         self.engine = engine
         self.type_names = list(type_names)
+
+
+@dataclass
+class TypeChange:
+    """One planned Local Types action derived from a parsed import result."""
+
+    action: str
+    name: str
+    old_decl: str = ""
+    new_decl: str = ""
+    reason: str = ""
+
+
+@dataclass
+class SyncPlan:
+    """Dry-run plan describing what an import would change."""
+
+    engine: str
+    changes: List[TypeChange]
+    resulting_type_names: List[str]
+
+
+class PreparedSync:
+    """Parsed temporary TIL plus the dry-run plan built from it."""
+
+    def __init__(self, engine: str, temp_til: Any, plan: SyncPlan) -> None:
+        self.engine = engine
+        self.temp_til = temp_til
+        self.plan = plan
 
 
 class ClangIncludeManager(QtCore.QObject):
@@ -62,28 +92,58 @@ class ClangIncludeManager(QtCore.QObject):
         Auto mode may try more than one backend before reporting failure.
         """
 
+        prepared = self.prepare_sync(profile)
+        try:
+            return self.apply_prepared_sync(profile, prepared)
+        finally:
+            self.release_prepared_sync(prepared)
+
+    def prepare_sync(self, profile: Profile) -> PreparedSync:
+        """Parse the header and build a dry-run plan without touching Local Types."""
+
         self._validate_profile(profile)
         self.save_profile(profile)
 
         engines = self._engine_order(profile.engine)
         errors = []
         for engine in engines:
+            temp_til = None
             try:
                 self.log(f"Parsing with {engine} engine...")
-                result = self._sync_with_engine(profile, engine)
-                profile.last_engine_used = engine
-                profile.managed_type_names = result.type_names
-                self.save_profile(profile)
+                temp_til = self._parse_with_engine(profile, engine)
+                plan = self._build_sync_plan(profile, engine, temp_til)
                 self.log(
-                    f"Imported {len(result.type_names)} managed types using {engine}."
+                    f"Prepared {len(plan.changes)} planned change(s) using {engine}."
                 )
-                return result
+                return PreparedSync(engine, temp_til, plan)
             except Exception as exc:
+                if temp_til is not None:
+                    self._free_til(temp_til)
                 message = f"{engine} engine failed: {exc}"
                 errors.append(message)
                 self.log(message)
 
         raise ClangIncludeError("\n".join(errors))
+
+    def apply_prepared_sync(
+        self, profile: Profile, prepared: PreparedSync
+    ) -> SyncResult:
+        """Apply a previously prepared dry-run plan to Local Types."""
+
+        type_names = self._apply_sync_plan(prepared.temp_til, prepared.plan)
+        profile.last_engine_used = prepared.engine
+        profile.managed_type_names = type_names
+        self.save_profile(profile)
+        self.log(f"Imported {len(type_names)} managed types using {prepared.engine}.")
+        return SyncResult(prepared.engine, type_names)
+
+    def release_prepared_sync(self, prepared: Optional[PreparedSync]) -> None:
+        """Free the temporary TIL associated with a prepared sync result."""
+
+        if prepared is None or prepared.temp_til is None:
+            return
+        self._free_til(prepared.temp_til)
+        prepared.temp_til = None
 
     def log(self, message: str) -> None:
         """Send a message to both the dockable view and IDA's output window."""
@@ -135,30 +195,16 @@ class ClangIncludeManager(QtCore.QObject):
             return ["external", "api"]
         return ["api", "external"]
 
-    def _sync_with_engine(self, profile: Profile, engine: str) -> SyncResult:
-        """Parse with one backend and apply the resulting named types."""
+    def _parse_with_engine(self, profile: Profile, engine: str) -> Any:
+        """Parse with one backend and return the temporary TIL."""
 
-        temp_til = None
-        try:
-            # Get the parsed types into a temporary TIL, then merge them into
-            # the IDB's main TIL according to the plugin's rules.
-            match engine:
-                case "api":
-                    temp_til = self._parse_with_api(profile)
-                case "external":
-                    temp_til = self._parse_with_external(profile)
-                case _:
-                    raise ClangIncludeError(f"Unknown engine: {engine}")
-
-            type_names = self._apply_managed_types(temp_til, profile.managed_type_names)
-            return SyncResult(engine, type_names)
-        finally:
-            # Temporary TILs are only used as an intermediate graph.
-            if temp_til is not None:
-                try:
-                    ida_typeinf.free_til(temp_til)
-                except Exception:
-                    pass
+        match engine:
+            case "api":
+                return self._parse_with_api(profile)
+            case "external":
+                return self._parse_with_external(profile)
+            case _:
+                raise ClangIncludeError(f"Unknown engine: {engine}")
 
     def _build_parser_args(self, profile: Profile) -> List[str]:
         """Build argv for either parser backend.
@@ -294,48 +340,119 @@ class ClangIncludeManager(QtCore.QObject):
 
         return Path(tempfile.gettempdir()) / "ida-clang-include" / "managed-temp.til"
 
-    def _apply_managed_types(
+    def _build_sync_plan(
         self,
+        profile: Profile,
+        engine: str,
         source_til: Any,
-        managed_names: Sequence[str],
-    ) -> List[str]:
-        """Merge parsed named types into Local Types."""
+    ) -> SyncPlan:
+        """Compute the Local Types changes implied by the parsed source TIL."""
 
         source_names = sorted(source_til.type_names)
         if not source_names:
             raise ClangIncludeError("Parser succeeded but produced no named types.")
 
         idati = ida_typeinf.get_idati()
-        managed_set = set(managed_names)
+        managed_set = set(profile.managed_type_names)
         source_set = set(source_names)
         stale_managed = sorted(managed_set - source_set)
+        changes: List[TypeChange] = []
 
         # Optionally remove names that used to be managed by the plugin but no
         # longer appear in the current parse result.
-        if self.profile.delete_missing_managed_types:
+        if profile.delete_missing_managed_types:
             for name in stale_managed:
                 if self._type_exists(idati, name):
-                    ida_typeinf.del_named_type(idati, name, ida_typeinf.NTF_TYPE)
-                    self.log(f"Deleted stale managed type: {name}")
+                    changes.append(
+                        TypeChange(
+                            action="delete",
+                            name=name,
+                            old_decl=self._get_named_type_decl(idati, name),
+                            reason="Previously managed type no longer exists in the latest parse result.",
+                        )
+                    )
 
         conflicts = []
         skipped_names = set()
+        imported_names = []
         for name in source_names:
+            new_decl = self._get_named_type_decl(source_til, name)
             if not self._type_exists(idati, name):
+                changes.append(
+                    TypeChange(
+                        action="create",
+                        name=name,
+                        new_decl=new_decl,
+                        reason="New named type from the parsed header.",
+                    )
+                )
+                imported_names.append(name)
                 continue
+
+            old_decl = self._get_named_type_decl(idati, name)
+            unchanged = bool(old_decl) and old_decl == new_decl
 
             # Managed names already belong to the plugin, so they are candidates
             # for in-place replacement rather than conflict handling.
             if name in managed_set:
+                imported_names.append(name)
+                if unchanged:
+                    changes.append(
+                        TypeChange(
+                            action="keep",
+                            name=name,
+                            old_decl=old_decl,
+                            new_decl=new_decl,
+                            reason="Managed type is unchanged.",
+                        )
+                    )
+                else:
+                    changes.append(
+                        TypeChange(
+                            action="replace",
+                            name=name,
+                            old_decl=old_decl,
+                            new_decl=new_decl,
+                            reason="Managed type will be refreshed in place.",
+                        )
+                    )
                 continue
 
             # Unmanaged collisions follow the user-selected conflict policy.
-            if self.profile.existing_type_policy == "overwrite":
-                self.log(f"Overwriting existing unmanaged Local Type: {name}")
+            if profile.existing_type_policy == "overwrite":
+                imported_names.append(name)
+                if unchanged:
+                    changes.append(
+                        TypeChange(
+                            action="adopt",
+                            name=name,
+                            old_decl=old_decl,
+                            new_decl=new_decl,
+                            reason="Existing unmanaged type matches and will become plugin-managed.",
+                        )
+                    )
+                else:
+                    changes.append(
+                        TypeChange(
+                            action="replace",
+                            name=name,
+                            old_decl=old_decl,
+                            new_decl=new_decl,
+                            reason="Existing unmanaged type will be overwritten per policy.",
+                        )
+                    )
                 continue
-            if self.profile.existing_type_policy == "skip":
+            if profile.existing_type_policy == "skip":
                 skipped_names.add(name)
-                self.log(f"Skipping existing unmanaged Local Type: {name}")
+                changes.append(
+                    TypeChange(
+                        action="skip",
+                        name=name,
+                        old_decl=old_decl,
+                        new_decl=new_decl,
+                        reason="Existing unmanaged type will be left untouched per policy.",
+                    )
+                )
                 continue
             conflicts.append(name)
 
@@ -347,35 +464,116 @@ class ClangIncludeManager(QtCore.QObject):
                 f"{preview}{suffix}. Change the overwrite policy in Options to overwrite or skip them."
             )
 
-        imported_names = []
-        for name in source_names:
-            if name in skipped_names:
+        # If stale managed types are kept, they remain in the managed set for
+        # future refreshes.
+        if not profile.delete_missing_managed_types:
+            imported_names.extend(stale_managed)
+        return SyncPlan(
+            engine=engine,
+            changes=changes,
+            resulting_type_names=sorted(set(imported_names)),
+        )
+
+    def _apply_sync_plan(self, source_til: Any, plan: SyncPlan) -> List[str]:
+        """Apply a previously computed sync plan to Local Types."""
+
+        idati = ida_typeinf.get_idati()
+
+        for change in plan.changes:
+            if change.action == "delete" and self._type_exists(idati, change.name):
+                ida_typeinf.del_named_type(idati, change.name, ida_typeinf.NTF_TYPE)
+                self.log(f"Deleted stale managed type: {change.name}")
+
+        for change in plan.changes:
+            if change.action not in ("create", "replace"):
+                if change.action == "skip":
+                    self.log(f"Skipping existing unmanaged Local Type: {change.name}")
+                elif change.action == "adopt":
+                    self.log(
+                        f"Adopting unchanged unmanaged Local Type into managed set: {change.name}"
+                    )
                 continue
 
             tif = ida_typeinf.tinfo_t()
-            if not tif.get_named_type(source_til, name):
-                raise ClangIncludeError(f"Failed to read parsed type: {name}")
+            if not tif.get_named_type(source_til, change.name):
+                raise ClangIncludeError(f"Failed to read parsed type: {change.name}")
 
-            # Replace if the name is already managed by the plugin or if the
-            # user explicitly chose to overwrite an unmanaged collision.
-            replace = name in managed_set or (
-                self.profile.existing_type_policy == "overwrite"
-                and self._type_exists(idati, name)
-            )
-            self._write_named_type(idati, tif, name, replace=replace)
-            imported_names.append(name)
+            replace = change.action == "replace"
+            if replace and self._type_exists(idati, change.name):
+                self.log(f"Replacing Local Type: {change.name}")
+            elif not replace:
+                self.log(f"Creating Local Type: {change.name}")
+            self._write_named_type(idati, tif, change.name, replace=replace)
 
-        # If stale managed types are kept, they remain in the managed set for
-        # future refreshes.
-        if not self.profile.delete_missing_managed_types:
-            imported_names.extend(stale_managed)
-        return sorted(set(imported_names))
+        return list(plan.resulting_type_names)
 
     def _type_exists(self, til: Any, name: str) -> bool:
         """Check whether a named type already exists in the given type library."""
 
         tif = ida_typeinf.tinfo_t()
         return bool(tif.get_named_type(til, name))
+
+    def _get_named_type_decl(self, til: Any, name: str) -> str:
+        """Return a best-effort declaration string for one named type."""
+
+        tif = ida_typeinf.tinfo_t()
+        if not tif.get_named_type(til, name):
+            return ""
+        decl = self._print_tinfo_decl(tif, name)
+        if decl:
+            return decl
+        try:
+            return tif.dstr()
+        except Exception:
+            return name
+
+    def _print_tinfo_decl(self, tif: ida_typeinf.tinfo_t, name: str) -> str:
+        """Ask IDA for a fuller C-style declaration for diff rendering."""
+
+        flags = self._print_decl_flags()
+
+        print_tinfo = getattr(ida_typeinf, "print_tinfo", None)
+        if callable(print_tinfo):
+            try:
+                decl = print_tinfo("", 0, 0, flags, tif, name, "")
+                if isinstance(decl, str) and decl.strip():
+                    return decl.strip()
+            except Exception:
+                pass
+
+        print_method = getattr(tif, "_print", None)
+        if callable(print_method):
+            for args in ((name, flags), (name,), (None, flags), (None,)):
+                try:
+                    decl = print_method(*args)
+                    if isinstance(decl, str) and decl.strip():
+                        return decl.strip()
+                except Exception:
+                    pass
+
+        return ""
+
+    def _print_decl_flags(self) -> int:
+        """Build a conservative flag set for multi-line C declarations."""
+
+        flags = 0
+        for flag_name in (
+            "PRTYPE_TYPE",
+            "PRTYPE_DEF",
+            "PRTYPE_MULTI",
+            "PRTYPE_SEMI",
+            "PRTYPE_METHODS",
+        ):
+            flags |= int(getattr(ida_typeinf, flag_name, 0))
+        return flags
+
+    def _free_til(self, til: Any) -> None:
+        """Release a temporary TIL and ignore teardown errors."""
+
+        try:
+            ida_typeinf.free_til(til)
+        except Exception:
+            pass
 
     def _write_named_type(
         self,
