@@ -522,50 +522,39 @@ class ClangIncludeManager(QtCore.QObject):
         decl = self._print_tinfo_decl(tif, name)
         if decl:
             return decl
-        try:
-            return tif.dstr()
-        except Exception:
-            return name
+        decl = self._normalize_decl_text(tif.dstr())
+        if decl:
+            return decl
+        return name
 
     def _print_tinfo_decl(self, tif: ida_typeinf.tinfo_t, name: str) -> str:
         """Ask IDA for a fuller C-style declaration for diff rendering."""
 
         flags = self._print_decl_flags()
 
-        print_tinfo = getattr(ida_typeinf, "print_tinfo", None)
-        if callable(print_tinfo):
-            try:
-                decl = print_tinfo("", 0, 0, flags, tif, name, "")
-                if isinstance(decl, str) and decl.strip():
-                    return decl.strip()
-            except Exception:
-                pass
+        decl = self._normalize_decl_text(
+            ida_typeinf.print_tinfo("", 0, 0, flags, tif, name, "")
+        )
+        return decl
 
-        print_method = getattr(tif, "_print", None)
-        if callable(print_method):
-            for args in ((name, flags), (name,), (None, flags), (None,)):
-                try:
-                    decl = print_method(*args)
-                    if isinstance(decl, str) and decl.strip():
-                        return decl.strip()
-                except Exception:
-                    pass
+    def _normalize_decl_text(self, value: Any) -> str:
+        """Convert printer output into a trimmed declaration string."""
 
-        return ""
+        if value is None:
+            return ""
+        text = str(value).strip()
+        return text
 
     def _print_decl_flags(self) -> int:
         """Build a conservative flag set for multi-line C declarations."""
 
-        flags = 0
-        for flag_name in (
-            "PRTYPE_TYPE",
-            "PRTYPE_DEF",
-            "PRTYPE_MULTI",
-            "PRTYPE_SEMI",
-            "PRTYPE_METHODS",
-        ):
-            flags |= int(getattr(ida_typeinf, flag_name, 0))
-        return flags
+        return (
+            int(ida_typeinf.PRTYPE_TYPE)
+            | int(ida_typeinf.PRTYPE_DEF)
+            | int(ida_typeinf.PRTYPE_MULTI)
+            | int(ida_typeinf.PRTYPE_SEMI)
+            | int(ida_typeinf.PRTYPE_METHODS)
+        )
 
     def _free_til(self, til: Any) -> None:
         """Release a temporary TIL and ignore teardown errors."""

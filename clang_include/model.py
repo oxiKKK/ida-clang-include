@@ -54,8 +54,9 @@ class Profile:
         """Create a profile from persisted JSON while tolerating missing keys."""
 
         merged = cls()
+        field_names = cls.__dataclass_fields__
         for key, value in data.items():
-            if hasattr(merged, key):
+            if key in field_names:
                 setattr(merged, key, value)
         merged.__post_init__()
         return merged
