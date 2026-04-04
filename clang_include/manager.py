@@ -1,4 +1,4 @@
-"""Parsing, import orchestration, and Local Types synchronization logic."""
+"""Parsing, import management, and Local Types synchronization logic."""
 
 import subprocess
 import tempfile

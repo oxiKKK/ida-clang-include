@@ -23,6 +23,8 @@ class ClangIncludeView(ida_kernwin.PluginForm):
         self.manager = manager
         self.parent: Optional[QtWidgets.QWidget] = None
         self._widgets: Dict[str, QtWidgets.QWidget] = {}
+        self._preview_refresh_timer: Optional[QtCore.QTimer] = None
+        self._suspend_preview_refresh = False
         self.manager.log_message.connect(self._append_log)
 
     def OnCreate(self, form: Any) -> None:
@@ -74,9 +76,9 @@ Auto tries the preferred engine order from Options and falls back if the first e
         target_combo = self._make_editable_combo(COMMON_TARGETS)
         language_combo = self._make_editable_combo(COMMON_LANGUAGES)
         standard_edit = QtWidgets.QLineEdit()
-        target_combo.lineEdit().setPlaceholderText("Optional target triple")
-        language_combo.lineEdit().setPlaceholderText("Optional language")
-        standard_edit.setPlaceholderText("Optional standard, e.g. c11 or c++20")
+        target_combo.lineEdit().setPlaceholderText("Target triplet (leave blank for none)")
+        language_combo.lineEdit().setPlaceholderText("Language (leave blank for none)")
+        standard_edit.setPlaceholderText("Language standard, e.g. c11 or c++20 (leave blank for none)")
         self._set_help(
             target_combo,
             """Optional target triple passed to the parser, for example i686-pc-windows-msvc or x86_64-pc-windows-msvc.
@@ -208,7 +210,7 @@ This shows status messages, parser execution details, overwrite/skip decisions, 
         )
         editors_tabs.setTabToolTip(
             2,
-            "Free-form extra parser switches appended after the structured settings.",
+            "Extra clang arguments. e.g. '-fms-extensions -Wno-some-warning'. See the preview window for a preview.",
         )
         editors_tabs.setTabToolTip(
             3,
@@ -236,6 +238,11 @@ This shows status messages, parser execution details, overwrite/skip decisions, 
         root.addWidget(body_splitter, 1)
         self.parent.setLayout(root)
 
+        # So that the preview gets updated live.
+        self._preview_refresh_timer = QtCore.QTimer(self.parent)
+        self._preview_refresh_timer.setSingleShot(True)
+        self._preview_refresh_timer.timeout.connect(self._refresh_preview)
+
         self._widgets = {
             "header_path": header_edit,
             "idaclang_path": idaclang_edit,
@@ -262,12 +269,15 @@ This shows status messages, parser execution details, overwrite/skip decisions, 
         clear_log_button.clicked.connect(log_edit.clear)
 
         for key in ("header_path", "idaclang_path", "standard"):
-            self._widgets[key].textChanged.connect(self._refresh_preview)
+            self._widgets[key].textChanged.connect(self._schedule_preview_refresh)
         for key in ("target", "language"):
-            self._widgets[key].currentTextChanged.connect(self._refresh_preview)
+            self._widgets[key].editTextChanged.connect(self._schedule_preview_refresh)
+            self._widgets[key].currentIndexChanged.connect(
+                self._schedule_preview_refresh
+            )
         for key in ("include_paths", "macros", "extra_args", "raw_argv"):
-            self._widgets[key].textChanged.connect(self._refresh_preview)
-        engine_combo.currentIndexChanged.connect(self._refresh_preview)
+            self._widgets[key].textChanged.connect(self._schedule_preview_refresh)
+        engine_combo.currentIndexChanged.connect(self._schedule_preview_refresh)
 
     def _make_large_editor(
         self, placeholder: str, read_only: bool = False, no_wrap: bool = True
@@ -329,6 +339,7 @@ This shows status messages, parser execution details, overwrite/skip decisions, 
     def _load_profile(self, profile: Profile) -> None:
         """Populate the UI from the currently saved profile."""
 
+        self._suspend_preview_refresh = True
         self._widgets["header_path"].setText(profile.header_path)
         self._widgets["idaclang_path"].setText(profile.idaclang_path)
         self._widgets["target"].setCurrentText(profile.target)
@@ -341,6 +352,7 @@ This shows status messages, parser execution details, overwrite/skip decisions, 
         index = self._widgets["engine"].findData(profile.engine)
         if index >= 0:
             self._widgets["engine"].setCurrentIndex(index)
+        self._suspend_preview_refresh = False
         self._widgets["status"].setText(self._status_text(profile))
         self._refresh_preview()
 
@@ -431,6 +443,13 @@ This shows status messages, parser execution details, overwrite/skip decisions, 
             preview = f"Failed to build preview: {exc}"
         self._widgets["preview"].setPlainText(preview)
         self._widgets["status"].setText(self._status_text(profile))
+
+    def _schedule_preview_refresh(self, *_args: Any) -> None:
+        """Coalesce field edits so the preview updates immediately and consistently."""
+
+        if self._suspend_preview_refresh or self._preview_refresh_timer is None:
+            return
+        self._preview_refresh_timer.start(0)
 
     def _status_text(self, profile: Profile) -> str:
         """Build the one-line status summary shown above the settings."""

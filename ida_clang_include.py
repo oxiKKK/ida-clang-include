@@ -1,5 +1,3 @@
-"""IDA plugin entrypoint for the Clang Include plugin."""
-
 from typing import Any
 
 import ida_idaapi
@@ -28,8 +26,7 @@ class OpenClangIncludeAction(ida_kernwin.action_handler_t):
 class ClangIncludePlugin(ida_idaapi.plugin_t):
     """IDA plugin entrypoint.
 
-    The main logic lives in the split `clang_include` package. This root module is
-    intentionally small because IDA imports this file directly.
+    The main logic lives in the `clang_include` package.
     """
 
     flags = ida_idaapi.PLUGIN_KEEP

@@ -1,1 +1,0 @@
-"""Clang Include plugin package."""
