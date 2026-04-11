@@ -17,5 +17,5 @@ Copy `ida_clang_include.py` and the `clang_include/` directory into your IDA `pl
 
 - Settings are stored per IDB.
 - Managed types are refreshed in place to reduce Local Types breakage on repeat imports.
-- Advanced conflict behavior is configurable from the plugin options dialog.
+- Existing unmanaged Local Types can be failed, skipped, or updated from the latest parsed header via the plugin options dialog.
 

@@ -419,7 +419,7 @@ class ClangIncludeManager(QtCore.QObject):
                 continue
 
             # Unmanaged collisions follow the user-selected conflict policy.
-            if profile.existing_type_policy == "overwrite":
+            if profile.existing_type_policy in ("overwrite", "update"):
                 imported_names.append(name)
                 if unchanged:
                     changes.append(
@@ -428,7 +428,7 @@ class ClangIncludeManager(QtCore.QObject):
                             name=name,
                             old_decl=old_decl,
                             new_decl=new_decl,
-                            reason="Existing unmanaged type matches and will become plugin-managed.",
+                            reason="Existing unmanaged type already matches and will become plugin-managed.",
                         )
                     )
                 else:
@@ -438,7 +438,7 @@ class ClangIncludeManager(QtCore.QObject):
                             name=name,
                             old_decl=old_decl,
                             new_decl=new_decl,
-                            reason="Existing unmanaged type will be overwritten per policy.",
+                            reason="Existing unmanaged type will be updated from the parsed header per policy.",
                         )
                     )
                 continue
@@ -461,7 +461,7 @@ class ClangIncludeManager(QtCore.QObject):
             suffix = "" if len(conflicts) <= 10 else f" (+{len(conflicts) - 10} more)"
             raise ClangIncludeError(
                 "Import blocked by existing unmanaged Local Types: "
-                f"{preview}{suffix}. Change the overwrite policy in Options to overwrite or skip them."
+                f"{preview}{suffix}. Change the existing-type policy in Options to update or skip them."
             )
 
         # If stale managed types are kept, they remain in the managed set for
@@ -494,16 +494,16 @@ class ClangIncludeManager(QtCore.QObject):
                     )
                 continue
 
-            tif = ida_typeinf.tinfo_t()
-            if not tif.get_named_type(source_til, change.name):
-                raise ClangIncludeError(f"Failed to read parsed type: {change.name}")
-
             replace = change.action == "replace"
-            if replace and self._type_exists(idati, change.name):
-                self.log(f"Replacing Local Type: {change.name}")
-            elif not replace:
+            if replace and self._local_type_exists(idati, change.name):
+                self.log(f"Updating Local Type from parsed header: {change.name}")
+            elif replace:
+                self.log(
+                    f"Creating Local Type shadow for existing base/library type: {change.name}"
+                )
+            else:
                 self.log(f"Creating Local Type: {change.name}")
-            self._write_named_type(idati, tif, change.name, replace=replace)
+            self._write_named_type(idati, source_til, change.name, replace=replace)
 
         return list(plan.resulting_type_names)
 
@@ -512,6 +512,23 @@ class ClangIncludeManager(QtCore.QObject):
 
         tif = ida_typeinf.tinfo_t()
         return bool(tif.get_named_type(til, name))
+
+    def _local_type_exists(self, til: Any, name: str) -> bool:
+        """Check whether a named type has a real local ordinal in this TIL."""
+
+        return self._get_local_type_ordinal(til, name) > 0
+
+    def _get_local_type_ordinal(self, til: Any, name: str) -> int:
+        """Resolve the local ordinal for one named type, if it exists locally."""
+
+        ordinal = int(ida_typeinf.get_type_ordinal(til, name) or 0)
+        if ordinal > 0:
+            return ordinal
+
+        tid = int(ida_typeinf.get_named_type_tid(name) or ida_typeinf.BADORD)
+        if tid in (ida_typeinf.BADORD, 0):
+            return 0
+        return int(ida_typeinf.get_tid_ordinal(tid) or 0)
 
     def _get_named_type_decl(self, til: Any, name: str) -> str:
         """Return a best-effort declaration string for one named type."""
@@ -567,23 +584,68 @@ class ClangIncludeManager(QtCore.QObject):
     def _write_named_type(
         self,
         target_til: Any,
-        tif: ida_typeinf.tinfo_t,
+        source_til: Any,
         name: str,
         replace: bool,
     ) -> None:
         """Create or replace one named type in the target type library.
 
-        `set_named_type()` copies a single named handle and has been observed to
-        lose the underlying type graph when moving parsed declarations from a
-        temporary TIL into `idati`. `import_type()` is the graph-aware primitive
-        IDA exposes for this job and brings along dependencies.
+        New imports still use `import_type()` because it brings along dependent
+        declarations from the temporary parse TIL. Replacements must preserve the
+        existing Local Types ordinal so all current references keep pointing at
+        the same logical type after an update.
         """
 
-        if replace and self._type_exists(target_til, name):
-            ida_typeinf.del_named_type(target_til, name, ida_typeinf.NTF_TYPE)
+        if replace and self._local_type_exists(target_til, name):
+            self._replace_named_type_in_place(target_til, source_til, name)
+            return
+
+        tif = ida_typeinf.tinfo_t()
+        if not tif.get_named_type(source_til, name):
+            raise ClangIncludeError(f"Failed to read parsed type: {name}")
 
         imported_tif = target_til.import_type(tif)
         if not imported_tif:
             action = "replace" if replace else "create"
             raise ClangIncludeError(f"Failed to {action} type {name}: import_type")
+
+    def _replace_named_type_in_place(
+        self,
+        target_til: Any,
+        source_til: Any,
+        name: str,
+    ) -> None:
+        """Overwrite an existing named type without changing its ordinal."""
+
+        ordinal = self._get_local_type_ordinal(target_til, name)
+        if ordinal <= 0:
+            raise ClangIncludeError(
+                f"Failed to update type {name}: could not resolve existing ordinal"
+            )
+
+        named_type = ida_typeinf.get_named_type(
+            source_til,
+            name,
+            int(ida_typeinf.NTF_TYPE),
+        )
+        if not named_type:
+            raise ClangIncludeError(f"Failed to read serialized type data: {name}")
+
+        _code, type_data, field_data, type_cmt, field_cmts, sclass, _value = named_type
+        result = ida_typeinf.set_numbered_type(
+            target_til,
+            ordinal,
+            int(ida_typeinf.NTF_TYPE) | int(ida_typeinf.NTF_REPLACE),
+            name,
+            type_data,
+            field_data,
+            type_cmt,
+            field_cmts,
+            sclass,
+        )
+        if result != ida_typeinf.TERR_OK:
+            error_text = ida_typeinf.tinfo_errstr(result) or str(result)
+            raise ClangIncludeError(
+                f"Failed to update type {name} in place: {error_text}"
+            )
 

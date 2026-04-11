@@ -33,7 +33,7 @@ class OptionsDialog(QtWidgets.QDialog):
 
         existing_policy = QtWidgets.QComboBox()
         existing_policy.addItem("Fail fast", "fail")
-        existing_policy.addItem("Overwrite existing", "overwrite")
+        existing_policy.addItem("Update existing from header", "update")
         existing_policy.addItem("Skip existing", "skip")
 
         auto_order = QtWidgets.QComboBox()
@@ -49,7 +49,7 @@ class OptionsDialog(QtWidgets.QDialog):
         existing_policy_help = """Controls what happens when the new parse result contains a type name that already exists in Local Types and was not previously managed by this plugin.
 
 "Fail fast" stops the refresh to protect manual work.
-"Overwrite existing" removes that Local Type and imports the parsed definition.
+    "Update existing from header" replaces that Local Type with the parsed definition and adopts it into the plugin-managed set.
 "Skip existing" leaves the old Local Type untouched and skips just that name."""
         auto_order_help = """Defines which backend Auto mode tries first.
 
@@ -99,9 +99,10 @@ Disable this if you prefer a quieter workflow and rely on the status line and lo
             "show_success_dialog": show_success,
         }
 
-        existing_policy.setCurrentIndex(
-            max(0, existing_policy.findData(profile.existing_type_policy))
-        )
+        current_policy = profile.existing_type_policy
+        if current_policy == "overwrite":
+            current_policy = "update"
+        existing_policy.setCurrentIndex(max(0, existing_policy.findData(current_policy)))
         auto_order.setCurrentIndex(
             max(0, auto_order.findData(profile.auto_engine_order))
         )

@@ -473,7 +473,7 @@ This shows status messages, parser execution details, overwrite/skip decisions, 
         """Build the one-line status summary shown above the settings."""
 
         managed = len(profile.managed_type_names)
-        policy = profile.existing_type_policy
+        policy = self._policy_label(profile.existing_type_policy)
         stale_mode = (
             "delete stale" if profile.delete_missing_managed_types else "keep stale"
         )
@@ -485,6 +485,17 @@ This shows status messages, parser execution details, overwrite/skip decisions, 
         return (
             f"Managed types: {managed}. Existing-type policy: {policy}. {stale_mode}."
         )
+
+    def _policy_label(self, value: str) -> str:
+        """Render stored policy values into human-readable status text."""
+
+        labels = {
+            "fail": "fail fast",
+            "overwrite": "update existing",
+            "update": "update existing",
+            "skip": "skip existing",
+        }
+        return labels.get(value, value)
 
     def _append_log(self, message: str) -> None:
         """Append a new line to the visible log pane if the form exists."""
