@@ -1,5 +1,6 @@
 """Parsing, import management, and Local Types synchronization logic."""
 
+import locale
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -104,22 +105,25 @@ class ClangIncludeManager(QtCore.QObject):
         self._validate_profile(profile)
         self.save_profile(profile)
 
-        engines = self._engine_order(profile.engine)
         errors = []
-        for engine in engines:
+        for engine in self._engine_order(profile.engine):
             temp_til = None
             try:
-                self.log(f"Parsing with {engine} engine...")
+                self.log(f"Parsing with {self._engine_label(engine)}...")
+                if engine == "external" and self._structured_logging_enabled(profile):
+                    self.log(
+                        "External parser logging flags are enabled. Detailed clang diagnostics will appear in the Clang Include log and IDA output window."
+                    )
                 temp_til = self._parse_with_engine(profile, engine)
                 plan = self._build_sync_plan(profile, engine, temp_til)
                 self.log(
-                    f"Prepared {len(plan.changes)} planned change(s) using {engine}."
+                    f"Prepared {len(plan.changes)} planned change(s) using {self._engine_label(engine)}."
                 )
                 return PreparedSync(engine, temp_til, plan)
             except Exception as exc:
                 if temp_til is not None:
                     self._free_til(temp_til)
-                message = f"{engine} engine failed: {exc}"
+                message = f"{self._engine_label(engine)} failed: {exc}"
                 errors.append(message)
                 self.log(message)
 
@@ -134,7 +138,9 @@ class ClangIncludeManager(QtCore.QObject):
         profile.last_engine_used = prepared.engine
         profile.managed_type_names = type_names
         self.save_profile(profile)
-        self.log(f"Imported {len(type_names)} managed types using {prepared.engine}.")
+        self.log(
+            f"Imported {len(type_names)} managed types using {self._engine_label(prepared.engine)}."
+        )
         return SyncResult(prepared.engine, type_names)
 
     def release_prepared_sync(self, prepared: Optional[PreparedSync]) -> None:
@@ -152,17 +158,28 @@ class ClangIncludeManager(QtCore.QObject):
         ida_kernwin.msg(f"{PLUGIN_NAME}: {message}\n")
 
     def build_preview_command(self, profile: Profile) -> str:
-        """Build the external-style command preview shown in the UI."""
+        """Build the parser command preview shown in the UI."""
 
-        args = self._build_parser_args(profile)
-        full = [
-            profile.idaclang_path or str(DEFAULT_IDACLANG),
-            *args,
-            "--idaclang-tilname",
-            str(self._external_temp_til_path()),
-            profile.header_path,
-        ]
-        return subprocess.list2cmdline(full)
+        api_preview = subprocess.list2cmdline(
+            [*self._build_api_parser_args(profile), profile.header_path]
+            if profile.header_path
+            else self._build_api_parser_args(profile)
+        )
+        external_preview = subprocess.list2cmdline(
+            self._build_external_command(profile, self._external_til_path(profile))
+        )
+
+        if profile.engine == "api":
+            return api_preview
+        if profile.engine == "external":
+            return external_preview
+
+        order = " -> ".join(self._engine_label(engine) for engine in self._engine_order("auto"))
+        return (
+            f"Auto order: {order}\n"
+            f"API argv: {api_preview}\n"
+            f"External command: {external_preview}"
+        )
 
     def _validate_profile(self, profile: Profile) -> None:
         """Reject invalid states before any parsing work starts."""
@@ -190,10 +207,18 @@ class ClangIncludeManager(QtCore.QObject):
             return ["api"]
         if preferred == "external":
             return ["external"]
-
         if self.profile.auto_engine_order == "external_first":
             return ["external", "api"]
         return ["api", "external"]
+
+    def _engine_label(self, engine: str) -> str:
+        """Render an internal engine identifier as user-facing text."""
+
+        labels = {
+            "api": "IDA parser API",
+            "external": "external idaclang",
+        }
+        return labels.get(engine, engine)
 
     def _parse_with_engine(self, profile: Profile, engine: str) -> Any:
         """Parse with one backend and return the temporary TIL."""
@@ -206,8 +231,8 @@ class ClangIncludeManager(QtCore.QObject):
             case _:
                 raise ClangIncludeError(f"Unknown engine: {engine}")
 
-    def _build_parser_args(self, profile: Profile) -> List[str]:
-        """Build argv for either parser backend.
+    def _build_api_parser_args(self, profile: Profile) -> List[str]:
+        """Build argv for the IDA parser API.
 
         A non-empty raw argv field overrides the structured controls because it
         represents the user's exact desired command line.
@@ -215,6 +240,24 @@ class ClangIncludeManager(QtCore.QObject):
 
         if profile.raw_argv.strip():
             return self._split_raw_args(profile.raw_argv)
+
+        args = self._build_structured_parser_args(profile)
+        args.extend(self._split_raw_args(profile.extra_args))
+        return args
+
+    def _build_external_parser_args(self, profile: Profile) -> List[str]:
+        """Build argv for the external idaclang executable."""
+
+        if profile.raw_argv.strip():
+            return self._split_raw_args(profile.raw_argv)
+
+        args = self._build_structured_parser_args(profile)
+        args.extend(self._build_idaclang_args(profile))
+        args.extend(self._split_raw_args(profile.extra_args))
+        return args
+
+    def _build_structured_parser_args(self, profile: Profile) -> List[str]:
+        """Build the common structured parser arguments shared by both backends."""
 
         args: List[str] = []
         if profile.target.strip():
@@ -229,8 +272,68 @@ class ClangIncludeManager(QtCore.QObject):
             macro = macro.strip()
             if macro:
                 args.append(f"-D{macro}")
-        args.extend(self._split_raw_args(profile.extra_args))
         return args
+
+    def _build_idaclang_args(self, profile: Profile) -> List[str]:
+        """Append advanced parser switches configured from the options dialog."""
+
+        args: List[str] = []
+        value_options = (
+            ("idaclang_tildesc", "--idaclang-tildesc"),
+            ("idaclang_macros_path", "--idaclang-macros"),
+            ("idaclang_smptrs", "--idaclang-smptrs"),
+            ("idaclang_mangle_format", "--idaclang-mangle-format"),
+        )
+        for attr_name, flag in value_options:
+            value = getattr(profile, attr_name, "").strip()
+            if value:
+                args.extend([flag, value])
+
+        bool_options = (
+            ("idaclang_opaqify_objc", "--idaclang-opaqify-objc"),
+            ("idaclang_extra_c_mangling", "--idaclang-extra-c-mangling"),
+            ("idaclang_parse_static", "--idaclang-parse-static"),
+        )
+        for attr_name, flag in bool_options:
+            if getattr(profile, attr_name, False):
+                args.append(flag)
+
+        if profile.idaclang_log_all:
+            args.append("--idaclang-log-all")
+            return args
+
+        log_options = (
+            ("idaclang_log_warnings", "--idaclang-log-warnings"),
+            ("idaclang_log_ast", "--idaclang-log-ast"),
+            ("idaclang_log_macros", "--idaclang-log-macros"),
+            ("idaclang_log_predefined", "--idaclang-log-predefined"),
+            ("idaclang_log_udts", "--idaclang-log-udts"),
+            ("idaclang_log_files", "--idaclang-log-files"),
+            ("idaclang_log_argv", "--idaclang-log-argv"),
+            ("idaclang_log_target", "--idaclang-log-target"),
+        )
+        for attr_name, flag in log_options:
+            if getattr(profile, attr_name, False):
+                args.append(flag)
+        return args
+
+    def _structured_logging_enabled(self, profile: Profile) -> bool:
+        """Return whether any structured parser logging option is enabled."""
+
+        return any(
+            getattr(profile, attr_name, False)
+            for attr_name in (
+                "idaclang_log_warnings",
+                "idaclang_log_ast",
+                "idaclang_log_macros",
+                "idaclang_log_predefined",
+                "idaclang_log_udts",
+                "idaclang_log_files",
+                "idaclang_log_argv",
+                "idaclang_log_target",
+                "idaclang_log_all",
+            )
+        )
 
     def _split_raw_args(self, raw: str) -> List[str]:
         """Split a Windows-style command line fragment into argv tokens."""
@@ -262,7 +365,7 @@ class ClangIncludeManager(QtCore.QObject):
         if not parser_name:
             raise ClangIncludeError("ida_srclang did not return a parser name.")
 
-        argv = subprocess.list2cmdline(self._build_parser_args(profile))
+        argv = subprocess.list2cmdline(self._build_api_parser_args(profile))
         rc = ida_srclang.set_parser_argv(parser_name, argv)
         if rc != 0:
             raise ClangIncludeError(
@@ -292,37 +395,43 @@ class ClangIncludeManager(QtCore.QObject):
     def _parse_with_external(self, profile: Profile) -> Any:
         """Run external idaclang.exe and load the generated temporary TIL."""
 
-        args = self._build_parser_args(profile)
-        temp_til_path = self._external_temp_til_path()
+        temp_til_path = self._external_til_path(profile)
         temp_til_path.parent.mkdir(parents=True, exist_ok=True)
         if temp_til_path.exists():
             temp_til_path.unlink()
+
+        command = self._build_external_command(profile, temp_til_path)
+        delete_after_load = not profile.idaclang_tilname.strip()
         try:
-            command = [
-                profile.idaclang_path,
-                *args,
-                "--idaclang-tilname",
-                str(temp_til_path),
-                profile.header_path,
-            ]
-            # Logging the exact command makes parser issues reproducible and
-            # easy to compare with manual command-line runs.
             self.log(f"Running external parser: {subprocess.list2cmdline(command)}")
             completed = subprocess.run(
-                command, capture_output=True, text=True, check=False
+                command, capture_output=True, text=False, check=False
             )
-            if profile.log_external_output and completed.stdout.strip():
-                self.log(completed.stdout.strip())
-            stderr = completed.stderr.strip()
-            if profile.log_external_output and stderr:
+            stdout = self._decode_process_output(completed.stdout)
+            stderr = self._decode_process_output(completed.stderr)
+            compiler_errors = self._extract_compiler_errors(stdout, stderr)
+            should_log_output = (
+                profile.log_external_output
+                or completed.returncode != 0
+                or bool(compiler_errors)
+            )
+            if should_log_output and stdout:
+                self.log(stdout)
+            if should_log_output and stderr:
                 self.log(stderr)
-            if completed.returncode != 0:
-                first_line = stderr.splitlines()[0] if stderr else ""
-                raise ClangIncludeError(
-                    f"idaclang exited with code {completed.returncode}. "
-                    "Review the Clang Include Log tab for compiler diagnostics."
-                    + (f" First diagnostic: {first_line}" if first_line else "")
-                )
+
+            if completed.returncode != 0 or compiler_errors:
+                first_error = compiler_errors[0] if compiler_errors else ""
+                message = "idaclang reported compiler errors. Review the Clang Include Log tab for diagnostics."
+                if completed.returncode != 0:
+                    message = (
+                        f"idaclang exited with code {completed.returncode}. "
+                        "Review the Clang Include Log tab for diagnostics."
+                    )
+                if first_error:
+                    message += f" First diagnostic: {first_error}"
+                raise ClangIncludeError(message)
+
             if not temp_til_path.is_file():
                 raise ClangIncludeError("idaclang completed without producing a TIL file.")
             temp_til = ida_typeinf.load_til(str(temp_til_path))
@@ -331,15 +440,69 @@ class ClangIncludeManager(QtCore.QObject):
             return temp_til
         finally:
             try:
-                if temp_til_path.exists():
+                if delete_after_load and temp_til_path.exists():
                     temp_til_path.unlink()
             except Exception:
                 pass
 
-    def _external_temp_til_path(self) -> Path:
-        """Return the concrete temporary .til path used by external parsing."""
+    def _build_external_command(self, profile: Profile, til_path: Path) -> List[str]:
+        """Build the full external idaclang command line."""
 
+        return [
+            profile.idaclang_path or str(DEFAULT_IDACLANG),
+            *self._build_external_parser_args(profile),
+            "--idaclang-tilname",
+            str(til_path),
+            profile.header_path,
+        ]
+
+    def _external_til_path(self, profile: Profile) -> Path:
+        """Return the output TIL path used by the external parser."""
+
+        if profile.idaclang_tilname.strip():
+            return Path(profile.idaclang_tilname)
         return Path(tempfile.gettempdir()) / "ida-clang-include" / "managed-temp.til"
+
+    def _extract_compiler_errors(self, *texts: str) -> List[str]:
+        """Collect lines that look like compiler errors from parser output."""
+
+        errors: List[str] = []
+        for text in texts:
+            for raw_line in text.splitlines():
+                line = raw_line.strip()
+                if not line:
+                    continue
+                lower = line.lower()
+                if "warning" in lower and "error" not in lower:
+                    continue
+                if (
+                    "fatal error:" in lower
+                    or ": error:" in lower
+                    or " error " in lower
+                    or lower.startswith("error ")
+                    or lower.startswith("error:")
+                ):
+                    errors.append(line)
+        return errors
+
+    def _decode_process_output(self, data: Optional[bytes]) -> str:
+        """Decode subprocess output safely without relying on the host code page."""
+
+        if not data:
+            return ""
+
+        encodings = ["utf-8", locale.getpreferredencoding(False), "cp1252", "latin-1"]
+        tried = set()
+        for encoding in encodings:
+            if not encoding or encoding in tried:
+                continue
+            tried.add(encoding)
+            try:
+                return data.decode(encoding)
+            except UnicodeDecodeError:
+                continue
+
+        return data.decode("utf-8", errors="replace")
 
     def _build_sync_plan(
         self,

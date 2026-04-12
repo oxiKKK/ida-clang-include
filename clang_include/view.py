@@ -59,20 +59,22 @@ class ClangIncludeView(ida_kernwin.PluginForm):
         header_help = """Top-level header file that Clang Include will parse and import into Local Types.
 
 Use the one umbrella header that represents the type set you want in this IDB. Refreshes always start from this file."""
-        idaclang_help = """Path to the external idaclang executable used by the fallback parser engine.
+        idaclang_help = """Path to the external idaclang executable used by the external parser backend.
 
-This is only used when Engine is set to External or when Auto falls back from the in-process API parser."""
+    This is used when Engine is set to External or when Auto falls back to external parsing."""
         header_edit, header_row = self._path_row(self._browse_header, header_help)
         idaclang_edit, idaclang_row = self._path_row(self._browse_idaclang, idaclang_help)
 
         engine_combo = QtWidgets.QComboBox()
-        engine_combo.addItem("Auto (API then external)", "auto")
+        engine_combo.addItem("Auto", "auto")
         engine_combo.addItem("IDA parser API only", "api")
         engine_combo.addItem("External idaclang only", "external")
-        engine_help = """Selects which parsing backend to use.
+        self._set_help(
+            engine_combo,
+            """Selects which parsing backend to use.
 
-Auto tries the preferred engine order from Options and falls back if the first engine fails. API uses IDA's in-process source parser only. External runs idaclang.exe and loads the generated types."""
-        self._set_help(engine_combo, engine_help)
+    Auto tries the preferred order from Options. API uses ida_srclang only. External runs idaclang.exe and loads the generated TIL."""
+        )
 
         target_combo = self._make_editable_combo(COMMON_TARGETS)
         language_combo = self._make_editable_combo(COMMON_LANGUAGES)
@@ -90,7 +92,7 @@ Leave it empty to omit -target entirely. This controls ABI-sensitive layout deci
             language_combo,
             """Optional source language passed with -x, such as c++ or c.
 
-Leave it empty to omit -x. The API parser still defaults to C++ internally when no language is given, but the external command preview and parser argv will not include -x unless you set one."""
+Leave it empty to omit -x. The API parser still defaults to C++ internally when no language is given."""
         )
         self._set_help(
             standard_edit,
@@ -132,11 +134,11 @@ Use this for switches such as -fms-extensions, warning suppressions, forced comp
             raw_argv_edit,
             """Full raw parser argument override.
 
-When this field is non-empty, Clang Include ignores Target, Language, Std, Includes, Macros, and Extra Args and uses this exact argument list instead."""
+When this field is non-empty, Clang Include ignores Target, Language, Std, Includes, Macros, Extra Args, and structured parser options from the Options dialog and uses this exact argument list instead."""
         )
         self._set_help(
             preview_edit,
-            """Read-only preview of the external-style command line that Clang Include would build from the current settings.
+            """Read-only preview of the parser command that matches the current engine selection.
 
 Use it to verify include paths, defines, target, and argument ordering before importing."""
         )
@@ -219,7 +221,7 @@ This shows status messages, parser execution details, overwrite/skip decisions, 
         )
         output_tabs.setTabToolTip(
             0,
-            "Wrapped command preview showing exactly how the current settings resolve into parser arguments.",
+            "Wrapped parser-argument preview showing exactly how the current settings resolve before import.",
         )
         output_tabs.setTabToolTip(
             1,
@@ -375,10 +377,27 @@ This shows status messages, parser execution details, overwrite/skip decisions, 
             extra_args=self._widgets["extra_args"].toPlainText().strip(),
             raw_argv=self._widgets["raw_argv"].toPlainText().strip(),
             engine=self._widgets["engine"].currentData(),
-            existing_type_policy=self.manager.profile.existing_type_policy,
-            delete_missing_managed_types=self.manager.profile.delete_missing_managed_types,
             auto_engine_order=self.manager.profile.auto_engine_order,
             log_external_output=self.manager.profile.log_external_output,
+            idaclang_tilname=self.manager.profile.idaclang_tilname,
+            idaclang_tildesc=self.manager.profile.idaclang_tildesc,
+            idaclang_macros_path=self.manager.profile.idaclang_macros_path,
+            idaclang_smptrs=self.manager.profile.idaclang_smptrs,
+            idaclang_mangle_format=self.manager.profile.idaclang_mangle_format,
+            idaclang_opaqify_objc=self.manager.profile.idaclang_opaqify_objc,
+            idaclang_extra_c_mangling=self.manager.profile.idaclang_extra_c_mangling,
+            idaclang_parse_static=self.manager.profile.idaclang_parse_static,
+            idaclang_log_warnings=self.manager.profile.idaclang_log_warnings,
+            idaclang_log_ast=self.manager.profile.idaclang_log_ast,
+            idaclang_log_macros=self.manager.profile.idaclang_log_macros,
+            idaclang_log_predefined=self.manager.profile.idaclang_log_predefined,
+            idaclang_log_udts=self.manager.profile.idaclang_log_udts,
+            idaclang_log_files=self.manager.profile.idaclang_log_files,
+            idaclang_log_argv=self.manager.profile.idaclang_log_argv,
+            idaclang_log_target=self.manager.profile.idaclang_log_target,
+            idaclang_log_all=self.manager.profile.idaclang_log_all,
+            existing_type_policy=self.manager.profile.existing_type_policy,
+            delete_missing_managed_types=self.manager.profile.delete_missing_managed_types,
             clear_log_before_import=self.manager.profile.clear_log_before_import,
             show_success_dialog=self.manager.profile.show_success_dialog,
             managed_type_names=list(self.manager.profile.managed_type_names),
@@ -439,11 +458,11 @@ This shows status messages, parser execution details, overwrite/skip decisions, 
             )
             result = self.manager.apply_prepared_sync(profile, prepared)
             self._widgets["status"].setText(
-                f"Last import used {result.engine}. Managed types: {len(result.type_names)}"
+                f"Last import used {self.manager._engine_label(result.engine)}. Managed types: {len(result.type_names)}"
             )
             if profile.show_success_dialog:
                 ida_kernwin.info(
-                    f"{PLUGIN_NAME} imported {len(result.type_names)} managed types using {result.engine}."
+                    f"{PLUGIN_NAME} imported {len(result.type_names)} managed types using {self.manager._engine_label(result.engine)}."
                 )
         except Exception as exc:
             apply_failed = True
@@ -497,11 +516,12 @@ This shows status messages, parser execution details, overwrite/skip decisions, 
         )
         if profile.last_engine_used:
             return (
-                f"Managed types: {managed}. Last engine: {profile.last_engine_used}. "
+                f"Managed types: {managed}. Last engine: {self.manager._engine_label(profile.last_engine_used)}. "
                 f"Existing-type policy: {policy}. {stale_mode}."
             )
         return (
-            f"Managed types: {managed}. Existing-type policy: {policy}. {stale_mode}."
+            f"Managed types: {managed}. Engine: {self.manager._engine_label(profile.engine)}. "
+            f"Existing-type policy: {policy}. {stale_mode}."
         )
 
     def _policy_label(self, value: str) -> str:

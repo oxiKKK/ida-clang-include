@@ -2,7 +2,7 @@
 
 Clang Include is an IDA Pro plugin for importing C and C++ header types into Local Types with clang-style parser arguments.
 
-It lets you configure a top-level header, include paths, macros, target, language standard, and parser behavior from a dockable UI inside IDA. Refreshes update plugin-managed types in place, can fall back to external `idaclang.exe`, and avoid the usual TIL reload workflow.
+It lets you configure a top-level header, include paths, macros, target, and language standard from a dockable UI inside IDA. Refreshes can use either IDA's in-process parser API or external `idaclang.exe`, update plugin-managed types in place, and avoid the usual TIL reload workflow.
 
 ## Layout
 

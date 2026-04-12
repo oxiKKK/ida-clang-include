@@ -17,7 +17,6 @@ SETTINGS_SLOT = 0
 SETTINGS_TAG = "S"
 ROOT_DIR = Path(__file__).resolve().parents[2]
 DEFAULT_IDACLANG = ROOT_DIR / "tools" / "idaclang" / "idaclang.exe"
-
 # Common parser target triples shown in the UI. The empty string keeps the
 # field optional and causes no -target flag to be emitted.
 COMMON_TARGETS = [
