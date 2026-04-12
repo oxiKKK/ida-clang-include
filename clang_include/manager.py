@@ -283,7 +283,10 @@ class ClangIncludeManager(QtCore.QObject):
             raise ClangIncludeError(f"ida_srclang parser {parser_name} was not available.")
         if err_count != 0:
             ida_typeinf.free_til(temp_til)
-            raise ClangIncludeError(f"ida_srclang reported {err_count} parse errors.")
+            raise ClangIncludeError(
+                f"ida_srclang reported {err_count} parse errors. "
+                "Review the Clang Include Log tab or IDA output window for compiler diagnostics."
+            )
         return temp_til
 
     def _parse_with_external(self, profile: Profile) -> Any:
@@ -310,17 +313,15 @@ class ClangIncludeManager(QtCore.QObject):
             )
             if profile.log_external_output and completed.stdout.strip():
                 self.log(completed.stdout.strip())
-            if (
-                profile.log_external_output
-                and completed.stderr.strip()
-                and completed.returncode == 0
-            ):
-                self.log(completed.stderr.strip())
+            stderr = completed.stderr.strip()
+            if profile.log_external_output and stderr:
+                self.log(stderr)
             if completed.returncode != 0:
-                stderr = completed.stderr.strip()
+                first_line = stderr.splitlines()[0] if stderr else ""
                 raise ClangIncludeError(
-                    f"idaclang exited with code {completed.returncode}."
-                    + (f" stderr: {stderr}" if stderr else "")
+                    f"idaclang exited with code {completed.returncode}. "
+                    "Review the Clang Include Log tab for compiler diagnostics."
+                    + (f" First diagnostic: {first_line}" if first_line else "")
                 )
             if not temp_til_path.is_file():
                 raise ClangIncludeError("idaclang completed without producing a TIL file.")

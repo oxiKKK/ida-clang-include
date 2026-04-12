@@ -257,6 +257,7 @@ This shows status messages, parser execution details, overwrite/skip decisions, 
             "raw_argv": raw_argv_edit,
             "preview": preview_edit,
             "log": log_edit,
+            "output_tabs": output_tabs,
             "status": status_label,
             "save": save_button,
             "options": options_button,
@@ -421,11 +422,12 @@ This shows status messages, parser execution details, overwrite/skip decisions, 
             prepared = self.manager.prepare_sync(profile)
         except Exception as exc:
             self._append_log(traceback.format_exc())
-            ida_kernwin.warning(str(exc))
+            self._notify_failure("Parsing failed", exc)
             return
         finally:
             ida_kernwin.hide_wait_box()
 
+        apply_failed = False
         try:
             dialog = SyncDiffDialog(prepared.plan, self.parent)
             if dialog.exec() != QtWidgets.QDialog.Accepted:
@@ -444,14 +446,29 @@ This shows status messages, parser execution details, overwrite/skip decisions, 
                     f"{PLUGIN_NAME} imported {len(result.type_names)} managed types using {result.engine}."
                 )
         except Exception as exc:
+            apply_failed = True
             self._append_log(traceback.format_exc())
-            ida_kernwin.warning(str(exc))
+            self._notify_failure("Import failed", exc)
         finally:
             self.manager.release_prepared_sync(prepared)
             ida_kernwin.hide_wait_box()
-            self._refresh_preview()
+            self._refresh_preview(update_status=not apply_failed)
 
-    def _refresh_preview(self) -> None:
+    def _notify_failure(self, title: str, exc: Exception) -> None:
+        """Show a visible failure notification and focus the log pane."""
+
+        message = str(exc).strip() or exc.__class__.__name__
+        self._widgets["status"].setText(f"{title}: {message}")
+
+        output_tabs = self._widgets.get("output_tabs")
+        log_widget = self._widgets.get("log")
+        if isinstance(output_tabs, QtWidgets.QTabWidget) and log_widget is not None:
+            output_tabs.setCurrentWidget(log_widget)
+
+        self._append_log(f"{title}: {message}")
+        ida_kernwin.warning(f"{PLUGIN_NAME}: {title}.\n\n{message}")
+
+    def _refresh_preview(self, update_status: bool = True) -> None:
         """Refresh the derived command preview and status summary."""
 
         profile = self._collect_profile()
@@ -460,7 +477,8 @@ This shows status messages, parser execution details, overwrite/skip decisions, 
         except Exception as exc:
             preview = f"Failed to build preview: {exc}"
         self._widgets["preview"].setPlainText(preview)
-        self._widgets["status"].setText(self._status_text(profile))
+        if update_status:
+            self._widgets["status"].setText(self._status_text(profile))
 
     def _schedule_preview_refresh(self, *_args: Any) -> None:
         """Coalesce field edits so the preview updates immediately and consistently."""
