@@ -2,7 +2,7 @@
   "IDAMetadataDescriptorVersion": 1,
   "plugin": {
     "name": "clang-include",
-    "version": "1.0.1",
+    "version": "1.0.0",
     "entryPoint": "ida_clang_include.py",
     "idaVersions": [
       "9.0",
