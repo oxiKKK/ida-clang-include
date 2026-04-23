@@ -40,7 +40,22 @@ class ClangIncludeView(ida_kernwin.PluginForm):
 
     def Show(self, caption: str) -> None:
         ida_kernwin.PluginForm.Show(
-            self, caption, options=ida_kernwin.PluginForm.WOPN_TAB
+            self,
+            caption,
+            options=(
+                ida_kernwin.PluginForm.WOPN_TAB
+                | ida_kernwin.PluginForm.WOPN_PERSIST
+            ),
+        )
+
+    def Restore(self, caption: str) -> None:
+        ida_kernwin.PluginForm.Show(
+            self,
+            caption,
+            options=(
+                ida_kernwin.PluginForm.WOPN_RESTORE
+                | ida_kernwin.PluginForm.WOPN_PERSIST
+            ),
         )
 
     def _build_ui(self) -> None:

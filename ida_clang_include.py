@@ -41,6 +41,18 @@ class ClangIncludePlugin(ida_idaapi.plugin_t):
         self.manager = None
         self.view = None
 
+    def _ensure_view(self) -> ClangIncludeView:
+        if self.manager is None:
+            # The manager owns the persistent profile and all sync behavior.
+            self.manager = ClangIncludeManager()
+
+        if self.view is None:
+            # Build the dockable Qt view lazily, but keep one instance alive so
+            # IDA can restore its persisted docking state across sessions.
+            self.view = ClangIncludeView(self.manager)
+
+        return self.view
+
     def init(self) -> int:
         # Register an IDA action so the plugin shows up as a normal menu item
         # under Options.
@@ -57,19 +69,11 @@ class ClangIncludePlugin(ida_idaapi.plugin_t):
         ida_kernwin.attach_action_to_menu(
             self.menu_path, PLUGIN_ACTION, ida_kernwin.SETMENU_APP
         )
+        self._ensure_view().Restore(PLUGIN_NAME)
         return ida_idaapi.PLUGIN_KEEP
 
     def run(self, arg: int) -> None:
-        if self.manager is None:
-            # The manager owns the persistent profile and all sync behavior.
-            self.manager = ClangIncludeManager()
-
-        if self.view is None:
-            # Build the dockable Qt view lazily the first time the user opens
-            # the plugin.
-            self.view = ClangIncludeView(self.manager)
-
-        self.view.Show(PLUGIN_NAME)
+        self._ensure_view().Show(PLUGIN_NAME)
 
     def term(self) -> None:
         try:
