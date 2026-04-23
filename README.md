@@ -1,10 +1,11 @@
-<p align="center">
-	<img src=".img/logo_transparent.png" alt="Clang Include logo" width="420" />
-</p>
-
 # IDAPro Clang Include
 
 Clang Include is an IDA Pro plugin for importing C and C++ headers into Local Types with a clang-compatible argument model.
+
+<p align="center">
+	<img src=".img/logo.png" alt="Clang Include logo" width="400" />
+</p>
+
 
 It is built for the common reverse-engineering workflow where you already have an **umbrella header** (header with many includes for types you want to parse), but you do not want to keep rebuilding and reloading *TIL* files just to iterate on types. The plugin keeps a per-IDB import profile, supports both IDA's parser API and external `idaclang.exe`, previews the exact Local Types changes before applying them, and refreshes previously managed types in place.
 
