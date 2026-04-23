@@ -19,6 +19,7 @@
     "urls": {
       "repository": "https://github.com/oxiKKK/ida-clang-include"
     },
+    "logoPath": ".img/logo.png",
     "authors": [
       {
         "name": "oxiKKK",
