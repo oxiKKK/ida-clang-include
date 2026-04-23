@@ -1,12 +1,12 @@
+<p align="center">
+	<img src=".img/logo_transparent.png" alt="Clang Include logo" width="420" />
+</p>
+
 # IDAPro Clang Include
 
 Clang Include is an IDA Pro plugin for importing C and C++ headers into Local Types with a clang-compatible argument model.
 
 It is built for the common reverse-engineering workflow where you already have an **umbrella header** (header with many includes for types you want to parse), but you do not want to keep rebuilding and reloading *TIL* files just to iterate on types. The plugin keeps a per-IDB import profile, supports both IDA's parser API and external `idaclang.exe`, previews the exact Local Types changes before applying them, and refreshes previously managed types in place.
-
-<p align="center">
-	<img src="assets/showcase.png" alt="Clang Include UI showcase" width="720" />
-</p>
 
 ## Why not use built-in ida-clang dialog?
 
@@ -15,7 +15,8 @@ The built-in IDAClang dialog is nice, but not perfect. The UI is poor, and somet
 It creates a nice diff of what is about to be changed after the import, and you can either discard or apply the changes:
 
 <p align="center">
-	<img src="assets/diff.png" alt="Clang Diff UI showcase" width="720" />
+	<img src="assets/showcase.png" alt="Clang Include UI showcase" width="49%" />
+	<img src="assets/diff.png" alt="Clang Diff UI showcase" width="49%" />
 </p>
 
 ## Features
@@ -31,10 +32,27 @@ It creates a nice diff of what is about to be changed after the import, and you 
 
 ## Installation
 
+Preferred installation is via HCLI once the plugin is packaged and indexed by the IDA Plugin Manager:
+
+```bash
+hcli plugin install clang-include
+```
+
+If you have not installed HCLI yet, install it first and verify it is available:
+
+```bash
+hcli --version
+```
+
+If the plugin is not visible in the repository yet, or if you are testing local source changes, use the manual install path instead.
+
+### Manual Install
+
 Copy the following into your IDA installation `plugins/` directory:
 
 - `ida_clang_include.py`
 - `clang_include/`
+- `ida-plugin.json`
 
 Then start IDA and open the plugin from `Options -> Clang Include...`.
 

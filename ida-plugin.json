@@ -1,0 +1,38 @@
+{
+  "IDAMetadataDescriptorVersion": 1,
+  "plugin": {
+    "name": "clang-include",
+    "version": "1.0.1",
+    "entryPoint": "ida_clang_include.py",
+    "idaVersions": [
+      "9.0",
+      "9.1",
+      "9.2",
+      "9.3"
+    ],
+    "description": "Import C and C++ headers into Local Types from a dockable UI with previewed refreshes and clang-compatible parser settings",
+    "license": "MIT",
+    "categories": [
+      "api-scripting-and-automation",
+      "ui-ux-and-visualization"
+    ],
+    "urls": {
+      "repository": "https://github.com/oxiKKK/ida-clang-include"
+    },
+    "authors": [
+      {
+        "name": "oxiKKK",
+        "email": "oxsscze@gmail.com"
+      }
+    ],
+    "keywords": [
+      "clang",
+      "idaclang",
+      "local-types",
+      "c",
+      "c++",
+      "headers",
+      "type-import"
+    ]
+  }
+}
