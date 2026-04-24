@@ -20,4 +20,4 @@ jobs:
         run: uv tool run ruff format --check .
 
       - name: hcli plugin lint
-        run: uv tool run --from hcli hcli plugin lint .
+        run: uv tool run --with requests --from hcli hcli plugin lint .
