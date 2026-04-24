@@ -19,5 +19,8 @@ jobs:
       - name: Ruff format check
         run: uv tool run ruff format --check .
 
+      - name: Install hcli
+        run: curl -LsSf https://hcli.docs.hex-rays.com/install | sh
+
       - name: hcli plugin lint
-        run: uv tool run --with requests --from hcli hcli plugin lint .
+        run: hcli plugin lint .
