@@ -109,9 +109,7 @@ class SyncDiffDialog(QtWidgets.QDialog):
         splitter.addWidget(left_panel)
         splitter.addWidget(right_panel)
 
-        buttons = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
-        )
+        buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
         buttons.button(QtWidgets.QDialogButtonBox.Ok).setText("Apply Changes")
         buttons.button(QtWidgets.QDialogButtonBox.Cancel).setText("Cancel")
         buttons.accepted.connect(self.accept)
@@ -148,11 +146,7 @@ class SyncDiffDialog(QtWidgets.QDialog):
             change
             for change in self._changes
             if change.action in allowed_actions
-            and (
-                not needle
-                or needle in change.name.lower()
-                or needle in change.reason.lower()
-            )
+            and (not needle or needle in change.name.lower() or needle in change.reason.lower())
         ]
 
         self._change_list.blockSignals(True)
@@ -211,15 +205,15 @@ class SyncDiffDialog(QtWidgets.QDialog):
             body {{
                 font-family: Consolas, 'Courier New', monospace;
                 font-size: 12px;
-                color: {colors['text']};
-                background: {colors['base']};
+                color: {colors["text"]};
+                background: {colors["base"]};
             }}
             .line {{ white-space: pre; padding: 1px 8px; }}
             .add {{ background: #e8f5e9; color: #1b5e20; }}
             .remove {{ background: #fdecea; color: #8a1c12; }}
-            .same {{ background: {colors['alternate_base']}; color: {colors['text']}; }}
+            .same {{ background: {colors["alternate_base"]}; color: {colors["text"]}; }}
             .hint {{
-                color: {colors['muted_text']};
+                color: {colors["muted_text"]};
                 font-family: Segoe UI, sans-serif;
                 margin-bottom: 8px;
             }}
@@ -234,9 +228,7 @@ class SyncDiffDialog(QtWidgets.QDialog):
 
     def _render_single_block(self, text: str, css_class: str) -> str:
         lines = self._normalize_lines(text)
-        return "".join(
-            f'<div class="line {css_class}">{html.escape(line)}</div>' for line in lines
-        )
+        return "".join(f'<div class="line {css_class}">{html.escape(line)}</div>' for line in lines)
 
     def _render_line_diff(self, old_text: str, new_text: str) -> str:
         old_lines = self._normalize_lines(old_text)
@@ -253,9 +245,7 @@ class SyncDiffDialog(QtWidgets.QDialog):
                 css_class = "same"
             else:
                 continue
-            rendered.append(
-                f'<div class="line {css_class}">{html.escape(text)}</div>'
-            )
+            rendered.append(f'<div class="line {css_class}">{html.escape(text)}</div>')
         if not rendered:
             return self._render_single_block(old_text or new_text, "same")
         return "".join(rendered)
@@ -270,7 +260,7 @@ class SyncDiffDialog(QtWidgets.QDialog):
         colors = self._html_palette()
         return f"""
         <html>
-        <body style="font-family: Segoe UI, sans-serif; color: {colors['muted_text']}; padding: 16px; background: {colors['base']};">
+        <body style="font-family: Segoe UI, sans-serif; color: {colors["muted_text"]}; padding: 16px; background: {colors["base"]};">
             No planned changes match the current filter.
         </body>
         </html>
@@ -296,13 +286,9 @@ class SyncDiffDialog(QtWidgets.QDialog):
         palette = self.palette()
         return {
             "base": self._color_hex(palette.color(QtGui.QPalette.Base)),
-            "alternate_base": self._color_hex(
-                palette.color(QtGui.QPalette.AlternateBase)
-            ),
+            "alternate_base": self._color_hex(palette.color(QtGui.QPalette.AlternateBase)),
             "text": self._color_hex(palette.color(QtGui.QPalette.Text)),
-            "muted_text": self._color_hex(
-                palette.color(QtGui.QPalette.PlaceholderText)
-            ),
+            "muted_text": self._color_hex(palette.color(QtGui.QPalette.PlaceholderText)),
         }
 
     def _color_hex(self, color: QtGui.QColor) -> str:

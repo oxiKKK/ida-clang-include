@@ -222,9 +222,7 @@ Disable this if you prefer a quieter workflow and rely on the status line and lo
         logging_layout.addStretch(1)
         tabs.addTab(logging_tab, "Logging")
 
-        buttons = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
-        )
+        buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
         root.addWidget(buttons)
 
         self._widgets: Dict[str, QtWidgets.QWidget] = {
@@ -277,17 +275,11 @@ Disable this if you prefer a quieter workflow and rely on the status line and lo
     def apply_to_profile(self, profile: Profile) -> Profile:
         """Write the dialog state back into the profile object."""
 
-        profile.existing_type_policy = self._widgets[
-            "existing_type_policy"
-        ].currentData()
+        profile.existing_type_policy = self._widgets["existing_type_policy"].currentData()
         profile.auto_engine_order = self._widgets["auto_engine_order"].currentData()
-        profile.delete_missing_managed_types = self._widgets[
-            "delete_missing_managed_types"
-        ].isChecked()
+        profile.delete_missing_managed_types = self._widgets["delete_missing_managed_types"].isChecked()
         profile.log_external_output = self._widgets["log_external_output"].isChecked()
-        profile.clear_log_before_import = self._widgets[
-            "clear_log_before_import"
-        ].isChecked()
+        profile.clear_log_before_import = self._widgets["clear_log_before_import"].isChecked()
         profile.show_success_dialog = self._widgets["show_success_dialog"].isChecked()
 
         for key, _label_text, _help_text, _placeholder in PARSER_VALUE_FIELDS:
@@ -299,4 +291,3 @@ Disable this if you prefer a quieter workflow and rely on the status line and lo
         for key in self._logging_option_keys:
             profile.__dict__[key] = self._widgets[key].isChecked()
         return profile
-
