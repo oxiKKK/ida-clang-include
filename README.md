@@ -1,5 +1,7 @@
 # IDAPro Clang Include
 
+👉 Available on the [Hex-Rays Plugin Repository](https://plugins.hex-rays.com/oxikkk/ida-clang-include/clang-include).
+
 Clang Include is an IDA Pro plugin for importing C and C++ headers into Local Types with a clang-compatible argument model.
 
 <p align="center">
