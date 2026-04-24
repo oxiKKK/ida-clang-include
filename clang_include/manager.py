@@ -116,9 +116,7 @@ class ClangIncludeManager(QtCore.QObject):
                     )
                 temp_til = self._parse_with_engine(profile, engine)
                 plan = self._build_sync_plan(profile, engine, temp_til)
-                self.log(
-                    f"Prepared {len(plan.changes)} planned change(s) using {self._engine_label(engine)}."
-                )
+                self.log(f"Prepared {len(plan.changes)} planned change(s) using {self._engine_label(engine)}.")
                 return PreparedSync(engine, temp_til, plan)
             except Exception as exc:
                 if temp_til is not None:
@@ -129,18 +127,14 @@ class ClangIncludeManager(QtCore.QObject):
 
         raise ClangIncludeError("\n".join(errors))
 
-    def apply_prepared_sync(
-        self, profile: Profile, prepared: PreparedSync
-    ) -> SyncResult:
+    def apply_prepared_sync(self, profile: Profile, prepared: PreparedSync) -> SyncResult:
         """Apply a previously prepared dry-run plan to Local Types."""
 
         type_names = self._apply_sync_plan(prepared.temp_til, prepared.plan)
         profile.last_engine_used = prepared.engine
         profile.managed_type_names = type_names
         self.save_profile(profile)
-        self.log(
-            f"Imported {len(type_names)} managed types using {self._engine_label(prepared.engine)}."
-        )
+        self.log(f"Imported {len(type_names)} managed types using {self._engine_label(prepared.engine)}.")
         return SyncResult(prepared.engine, type_names)
 
     def release_prepared_sync(self, prepared: Optional[PreparedSync]) -> None:
@@ -175,11 +169,7 @@ class ClangIncludeManager(QtCore.QObject):
             return external_preview
 
         order = " -> ".join(self._engine_label(engine) for engine in self._engine_order("auto"))
-        return (
-            f"Auto order: {order}\n"
-            f"API argv: {api_preview}\n"
-            f"External command: {external_preview}"
-        )
+        return f"Auto order: {order}\nAPI argv: {api_preview}\nExternal command: {external_preview}"
 
     def _validate_profile(self, profile: Profile) -> None:
         """Reject invalid states before any parsing work starts."""
@@ -187,18 +177,14 @@ class ClangIncludeManager(QtCore.QObject):
         if not ida_loader.get_path(ida_loader.PATH_TYPE_IDB):
             raise ClangIncludeError("Open an IDB before using the plugin.")
         if not ida_auto.auto_is_ok():
-            raise ClangIncludeError(
-                "Wait for auto-analysis to complete before importing types."
-            )
+            raise ClangIncludeError("Wait for auto-analysis to complete before importing types.")
         if not profile.header_path:
             raise ClangIncludeError("Header path is required.")
         if not Path(profile.header_path).is_file():
             raise ClangIncludeError(f"Header file does not exist: {profile.header_path}")
         if profile.engine in ("external", "auto"):
             if not Path(profile.idaclang_path).is_file():
-                raise ClangIncludeError(
-                    f"idaclang executable does not exist: {profile.idaclang_path}"
-                )
+                raise ClangIncludeError(f"idaclang executable does not exist: {profile.idaclang_path}")
 
     def _engine_order(self, preferred: str) -> List[str]:
         """Resolve the backend order for the current sync run."""
@@ -349,18 +335,14 @@ class ClangIncludeManager(QtCore.QObject):
 
         language = (profile.language or "c++").lower()
         if language in ("c", "objc"):
-            srclang = (
-                ida_srclang.SRCLANG_C if language == "c" else ida_srclang.SRCLANG_OBJC
-            )
+            srclang = ida_srclang.SRCLANG_C if language == "c" else ida_srclang.SRCLANG_OBJC
         elif language in ("objective-c++", "objcpp", "objc++"):
             srclang = ida_srclang.SRCLANG_OBJCPP
         else:
             srclang = ida_srclang.SRCLANG_CPP
 
         if not ida_srclang.select_parser_by_srclang(srclang):
-            raise ClangIncludeError(
-                f"No source parser is available in ida_srclang for language: {profile.language}"
-            )
+            raise ClangIncludeError(f"No source parser is available in ida_srclang for language: {profile.language}")
         parser_name = ida_srclang.get_selected_parser_name()
         if not parser_name:
             raise ClangIncludeError("ida_srclang did not return a parser name.")
@@ -368,9 +350,7 @@ class ClangIncludeManager(QtCore.QObject):
         argv = subprocess.list2cmdline(self._build_api_parser_args(profile))
         rc = ida_srclang.set_parser_argv(parser_name, argv)
         if rc != 0:
-            raise ClangIncludeError(
-                f"set_parser_argv failed with code {rc} for parser {parser_name}."
-            )
+            raise ClangIncludeError(f"set_parser_argv failed with code {rc} for parser {parser_name}.")
 
         # Parse into a temporary TIL first. Only after a fully successful parse
         # do we touch the IDB's Local Types.
@@ -378,9 +358,7 @@ class ClangIncludeManager(QtCore.QObject):
             "clang_include_api",
             "Clang Include API parse result",
         )
-        err_count = ida_srclang.parse_decls_with_parser(
-            parser_name, temp_til, profile.header_path, True
-        )
+        err_count = ida_srclang.parse_decls_with_parser(parser_name, temp_til, profile.header_path, True)
         if err_count < 0:
             ida_typeinf.free_til(temp_til)
             raise ClangIncludeError(f"ida_srclang parser {parser_name} was not available.")
@@ -404,17 +382,11 @@ class ClangIncludeManager(QtCore.QObject):
         delete_after_load = not profile.idaclang_tilname.strip()
         try:
             self.log(f"Running external parser: {subprocess.list2cmdline(command)}")
-            completed = subprocess.run(
-                command, capture_output=True, text=False, check=False
-            )
+            completed = subprocess.run(command, capture_output=True, text=False, check=False)
             stdout = self._decode_process_output(completed.stdout)
             stderr = self._decode_process_output(completed.stderr)
             compiler_errors = self._extract_compiler_errors(stdout, stderr)
-            should_log_output = (
-                profile.log_external_output
-                or completed.returncode != 0
-                or bool(compiler_errors)
-            )
+            should_log_output = profile.log_external_output or completed.returncode != 0 or bool(compiler_errors)
             if should_log_output and stdout:
                 self.log(stdout)
             if should_log_output and stderr:
@@ -653,18 +625,14 @@ class ClangIncludeManager(QtCore.QObject):
                 if change.action == "skip":
                     self.log(f"Skipping existing unmanaged Local Type: {change.name}")
                 elif change.action == "adopt":
-                    self.log(
-                        f"Adopting unchanged unmanaged Local Type into managed set: {change.name}"
-                    )
+                    self.log(f"Adopting unchanged unmanaged Local Type into managed set: {change.name}")
                 continue
 
             replace = change.action == "replace"
             if replace and self._local_type_exists(idati, change.name):
                 self.log(f"Updating Local Type from parsed header: {change.name}")
             elif replace:
-                self.log(
-                    f"Creating Local Type shadow for existing base/library type: {change.name}"
-                )
+                self.log(f"Creating Local Type shadow for existing base/library type: {change.name}")
             else:
                 self.log(f"Creating Local Type: {change.name}")
             self._write_named_type(idati, source_til, change.name, replace=replace)
@@ -713,9 +681,7 @@ class ClangIncludeManager(QtCore.QObject):
 
         flags = self._print_decl_flags()
 
-        decl = self._normalize_decl_text(
-            ida_typeinf.print_tinfo("", 0, 0, flags, tif, name, "")
-        )
+        decl = self._normalize_decl_text(ida_typeinf.print_tinfo("", 0, 0, flags, tif, name, ""))
         return decl
 
     def _normalize_decl_text(self, value: Any) -> str:
@@ -783,9 +749,7 @@ class ClangIncludeManager(QtCore.QObject):
 
         ordinal = self._get_local_type_ordinal(target_til, name)
         if ordinal <= 0:
-            raise ClangIncludeError(
-                f"Failed to update type {name}: could not resolve existing ordinal"
-            )
+            raise ClangIncludeError(f"Failed to update type {name}: could not resolve existing ordinal")
 
         named_type = ida_typeinf.get_named_type(
             source_til,
@@ -809,7 +773,4 @@ class ClangIncludeManager(QtCore.QObject):
         )
         if result != ida_typeinf.TERR_OK:
             error_text = ida_typeinf.tinfo_errstr(result) or str(result)
-            raise ClangIncludeError(
-                f"Failed to update type {name} in place: {error_text}"
-            )
-
+            raise ClangIncludeError(f"Failed to update type {name} in place: {error_text}")

@@ -1,0 +1,26 @@
+name: Lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Ruff check
+        run: uv tool run ruff check .
+
+      - name: Ruff format check
+        run: uv tool run ruff format --check .
+
+      - name: Install hcli
+        run: curl -LsSf https://hcli.docs.hex-rays.com/install | sh
+
+      - name: hcli plugin lint
+        run: hcli plugin lint .

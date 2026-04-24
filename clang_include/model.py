@@ -95,9 +95,7 @@ class SettingsStore:
         try:
             return Profile.from_dict(json.loads(blob.decode("utf-8")))
         except Exception:
-            ida_kernwin.msg(
-                f"{PLUGIN_NAME}: failed to load settings, using defaults.\n"
-            )
+            ida_kernwin.msg(f"{PLUGIN_NAME}: failed to load settings, using defaults.\n")
             return Profile()
 
     def save(self, profile: Profile) -> None:
@@ -105,4 +103,3 @@ class SettingsStore:
 
         blob = json.dumps(asdict(profile), indent=2).encode("utf-8")
         self._node.setblob(blob, SETTINGS_SLOT, SETTINGS_TAG)
-

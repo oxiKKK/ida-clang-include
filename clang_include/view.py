@@ -42,20 +42,14 @@ class ClangIncludeView(ida_kernwin.PluginForm):
         ida_kernwin.PluginForm.Show(
             self,
             caption,
-            options=(
-                ida_kernwin.PluginForm.WOPN_TAB
-                | ida_kernwin.PluginForm.WOPN_PERSIST
-            ),
+            options=(ida_kernwin.PluginForm.WOPN_TAB | ida_kernwin.PluginForm.WOPN_PERSIST),
         )
 
     def Restore(self, caption: str) -> None:
         ida_kernwin.PluginForm.Show(
             self,
             caption,
-            options=(
-                ida_kernwin.PluginForm.WOPN_RESTORE
-                | ida_kernwin.PluginForm.WOPN_PERSIST
-            ),
+            options=(ida_kernwin.PluginForm.WOPN_RESTORE | ida_kernwin.PluginForm.WOPN_PERSIST),
         )
 
     def _build_ui(self) -> None:
@@ -88,7 +82,7 @@ Use the one umbrella header that represents the type set you want in this IDB. R
             engine_combo,
             """Selects which parsing backend to use.
 
-    Auto tries the preferred order from Options. API uses ida_srclang only. External runs idaclang.exe and loads the generated TIL."""
+    Auto tries the preferred order from Options. API uses ida_srclang only. External runs idaclang.exe and loads the generated TIL.""",
         )
 
         target_combo = self._make_editable_combo(COMMON_TARGETS)
@@ -101,61 +95,55 @@ Use the one umbrella header that represents the type set you want in this IDB. R
             target_combo,
             """Optional target triple passed to the parser, for example i686-pc-windows-msvc or x86_64-pc-windows-msvc.
 
-Leave it empty to omit -target entirely. This controls ABI-sensitive layout decisions such as calling conventions, builtin type sizes, and some compiler defaults."""
+Leave it empty to omit -target entirely. This controls ABI-sensitive layout decisions such as calling conventions, builtin type sizes, and some compiler defaults.""",
         )
         self._set_help(
             language_combo,
             """Optional source language passed with -x, such as c++ or c.
 
-Leave it empty to omit -x. The API parser still defaults to C++ internally when no language is given."""
+Leave it empty to omit -x. The API parser still defaults to C++ internally when no language is given.""",
         )
         self._set_help(
             standard_edit,
             """Optional language standard passed to the parser, for example c++17, c++20, or c11.
 
-Leave it empty to omit -std entirely. Change this if the header depends on syntax or library behavior from a specific language version."""
+Leave it empty to omit -std entirely. Change this if the header depends on syntax or library behavior from a specific language version.""",
         )
 
         includes_edit = self._make_large_editor("One include path per line")
-        macros_edit = self._make_large_editor(
-            "One macro per line, e.g. _WIN32 or FOO=1"
-        )
-        extra_args_edit = self._make_large_editor(
-            "Extra parser args, e.g. -fms-extensions"
-        )
+        macros_edit = self._make_large_editor("One macro per line, e.g. _WIN32 or FOO=1")
+        extra_args_edit = self._make_large_editor("Extra parser args, e.g. -fms-extensions")
         raw_argv_edit = self._make_large_editor("Optional raw parser argv override")
-        preview_edit = self._make_large_editor(
-            "Resolved command preview", read_only=True, no_wrap=False
-        )
+        preview_edit = self._make_large_editor("Resolved command preview", read_only=True, no_wrap=False)
         self._set_help(
             includes_edit,
             """Additional include search paths, one directory per line.
 
-These become -I arguments. Add every project, SDK, and toolchain include directory needed for the header to parse successfully."""
+These become -I arguments. Add every project, SDK, and toolchain include directory needed for the header to parse successfully.""",
         )
         self._set_help(
             macros_edit,
             """Preprocessor defines, one per line.
 
-Each line becomes a -D argument. You can write bare flags like _WIN32 or assignments like FOO=1."""
+Each line becomes a -D argument. You can write bare flags like _WIN32 or assignments like FOO=1.""",
         )
         self._set_help(
             extra_args_edit,
             """Extra parser arguments appended after the structured fields.
 
-Use this for switches such as -fms-extensions, warning suppressions, forced compatibility flags, or anything not covered by the UI."""
+Use this for switches such as -fms-extensions, warning suppressions, forced compatibility flags, or anything not covered by the UI.""",
         )
         self._set_help(
             raw_argv_edit,
             """Full raw parser argument override.
 
-When this field is non-empty, Clang Include ignores Target, Language, Std, Includes, Macros, Extra Args, and structured parser options from the Options dialog and uses this exact argument list instead."""
+When this field is non-empty, Clang Include ignores Target, Language, Std, Includes, Macros, Extra Args, and structured parser options from the Options dialog and uses this exact argument list instead.""",
         )
         self._set_help(
             preview_edit,
             """Read-only preview of the parser command that matches the current engine selection.
 
-Use it to verify include paths, defines, target, and argument ordering before importing."""
+Use it to verify include paths, defines, target, and argument ordering before importing.""",
         )
 
         button_row = QtWidgets.QHBoxLayout()
@@ -177,7 +165,7 @@ Use it to verify include paths, defines, target, and argument ordering before im
             log_edit,
             """Import log output.
 
-This shows status messages, parser execution details, overwrite/skip decisions, and any errors reported during refresh."""
+This shows status messages, parser execution details, overwrite/skip decisions, and any errors reported during refresh.""",
         )
 
         settings_group = QtWidgets.QGroupBox("Import Settings")
@@ -291,9 +279,7 @@ This shows status messages, parser execution details, overwrite/skip decisions, 
             self._widgets[key].textChanged.connect(self._schedule_preview_refresh)
         for key in ("target", "language"):
             self._widgets[key].editTextChanged.connect(self._schedule_preview_refresh)
-            self._widgets[key].currentIndexChanged.connect(
-                self._schedule_preview_refresh
-            )
+            self._widgets[key].currentIndexChanged.connect(self._schedule_preview_refresh)
         for key in ("include_paths", "macros", "extra_args", "raw_argv"):
             self._widgets[key].textChanged.connect(self._schedule_preview_refresh)
         engine_combo.currentIndexChanged.connect(self._schedule_preview_refresh)
@@ -307,11 +293,7 @@ This shows status messages, parser execution details, overwrite/skip decisions, 
         editor.setPlaceholderText(placeholder)
         editor.setReadOnly(read_only)
         editor.setMaximumBlockCount(2000)
-        editor.setLineWrapMode(
-            QtWidgets.QPlainTextEdit.NoWrap
-            if no_wrap
-            else QtWidgets.QPlainTextEdit.WidgetWidth
-        )
+        editor.setLineWrapMode(QtWidgets.QPlainTextEdit.NoWrap if no_wrap else QtWidgets.QPlainTextEdit.WidgetWidth)
         editor.setMinimumHeight(220)
         return editor
 
@@ -380,14 +362,11 @@ This shows status messages, parser execution details, overwrite/skip decisions, 
 
         return Profile(
             header_path=self._widgets["header_path"].text().strip(),
-            idaclang_path=self._widgets["idaclang_path"].text().strip()
-            or str(DEFAULT_IDACLANG),
+            idaclang_path=self._widgets["idaclang_path"].text().strip() or str(DEFAULT_IDACLANG),
             target=self._widgets["target"].currentText().strip(),
             language=self._widgets["language"].currentText().strip(),
             standard=self._widgets["standard"].text().strip(),
-            include_paths=self._split_lines(
-                self._widgets["include_paths"].toPlainText()
-            ),
+            include_paths=self._split_lines(self._widgets["include_paths"].toPlainText()),
             macros=self._split_lines(self._widgets["macros"].toPlainText()),
             extra_args=self._widgets["extra_args"].toPlainText().strip(),
             raw_argv=self._widgets["raw_argv"].toPlainText().strip(),
@@ -450,9 +429,7 @@ This shows status messages, parser execution details, overwrite/skip decisions, 
             if profile.clear_log_before_import:
                 self._widgets["log"].clear()
 
-            ida_kernwin.show_wait_box(
-                "HIDECANCEL\nClang Include: parsing headers and preparing change preview..."
-            )
+            ida_kernwin.show_wait_box("HIDECANCEL\nClang Include: parsing headers and preparing change preview...")
             prepared = self.manager.prepare_sync(profile)
         except Exception as exc:
             self._append_log(traceback.format_exc())
@@ -468,9 +445,7 @@ This shows status messages, parser execution details, overwrite/skip decisions, 
                 self.manager.log("Import canceled from change preview dialog.")
                 return
 
-            ida_kernwin.show_wait_box(
-                "HIDECANCEL\nClang Include: applying previewed Local Types changes..."
-            )
+            ida_kernwin.show_wait_box("HIDECANCEL\nClang Include: applying previewed Local Types changes...")
             result = self.manager.apply_prepared_sync(profile, prepared)
             self._widgets["status"].setText(
                 f"Last import used {self.manager._engine_label(result.engine)}. Managed types: {len(result.type_names)}"
@@ -526,9 +501,7 @@ This shows status messages, parser execution details, overwrite/skip decisions, 
 
         managed = len(profile.managed_type_names)
         policy = self._policy_label(profile.existing_type_policy)
-        stale_mode = (
-            "delete stale" if profile.delete_missing_managed_types else "keep stale"
-        )
+        stale_mode = "delete stale" if profile.delete_missing_managed_types else "keep stale"
         if profile.last_engine_used:
             return (
                 f"Managed types: {managed}. Last engine: {self.manager._engine_label(profile.last_engine_used)}. "
@@ -587,4 +560,3 @@ This shows status messages, parser execution details, overwrite/skip decisions, 
         """Normalize multi-line editor input into a compact list of values."""
 
         return [line.strip() for line in text.splitlines() if line.strip()]
-

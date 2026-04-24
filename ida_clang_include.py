@@ -66,9 +66,7 @@ class ClangIncludePlugin(ida_idaapi.plugin_t):
                 -1,
             )
         )
-        ida_kernwin.attach_action_to_menu(
-            self.menu_path, PLUGIN_ACTION, ida_kernwin.SETMENU_APP
-        )
+        ida_kernwin.attach_action_to_menu(self.menu_path, PLUGIN_ACTION, ida_kernwin.SETMENU_APP)
         self._ensure_view().Restore(PLUGIN_NAME)
         return ida_idaapi.PLUGIN_KEEP
 
@@ -90,5 +88,3 @@ def PLUGIN_ENTRY() -> ClangIncludePlugin:
     """Factory function used by IDA to instantiate the plugin."""
 
     return ClangIncludePlugin()
-
-

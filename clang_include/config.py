@@ -36,5 +36,3 @@ COMMON_LANGUAGES = [
     "objective-c",
     "objective-c++",
 ]
-
-
