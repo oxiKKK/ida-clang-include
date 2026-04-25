@@ -87,4 +87,3 @@ def PLUGIN_ENTRY() -> ClangIncludePlugin:
 
     return ClangIncludePlugin()
 
-
