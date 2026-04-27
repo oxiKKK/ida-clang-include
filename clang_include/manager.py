@@ -12,10 +12,17 @@ import ida_kernwin
 import ida_loader
 import ida_srclang
 import ida_typeinf
-from PySide6 import QtCore
+import idaapi
 
 from .config import DEFAULT_IDACLANG, PLUGIN_NAME
 from .model import Profile, SettingsStore
+
+if idaapi.IDA_SDK_VERSION >= 920:
+    from PySide6 import QtCore
+    from PySide6.QtCore import Signal
+else:
+    from PyQt5 import QtCore
+    from PyQt5.QtCore import pyqtSignal as Signal
 
 
 class ClangIncludeError(RuntimeError):
@@ -64,8 +71,8 @@ class PreparedSync:
 class ClangIncludeManager(QtCore.QObject):
     """Coordinates parsing, conflict handling, and Local Types updates."""
 
-    log_message = QtCore.Signal(str)
-    profile_changed = QtCore.Signal(object)
+    log_message = Signal(str)
+    profile_changed = Signal(object)
 
     def __init__(self) -> None:
         super().__init__()

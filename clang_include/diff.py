@@ -4,9 +4,14 @@ import difflib
 import html
 from typing import Any, Dict, List, Optional
 
-from PySide6 import QtCore, QtGui, QtWidgets
+import idaapi
 
 from .config import PLUGIN_NAME
+
+if idaapi.IDA_SDK_VERSION >= 920:
+    from PySide6 import QtCore, QtGui, QtWidgets
+else:
+    from PyQt5 import QtCore, QtGui, QtWidgets
 
 
 class SyncDiffDialog(QtWidgets.QDialog):

@@ -2,11 +2,15 @@
 
 from typing import Any, Dict, Optional
 
-from PySide6 import QtWidgets
+import idaapi
 
 from .config import PLUGIN_NAME
 from .model import Profile
 
+if idaapi.IDA_SDK_VERSION >= 920:
+    from PySide6 import QtWidgets
+else:
+    from PyQt5 import QtWidgets
 
 PARSER_VALUE_FIELDS = (
     (

@@ -5,13 +5,18 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import ida_kernwin
-from PySide6 import QtCore, QtWidgets
+import idaapi
 
 from .config import COMMON_LANGUAGES, COMMON_TARGETS, DEFAULT_IDACLANG, PLUGIN_NAME
 from .diff import SyncDiffDialog
 from .manager import ClangIncludeManager
 from .model import Profile
 from .options import OptionsDialog
+
+if idaapi.IDA_SDK_VERSION >= 920:
+    from PySide6 import QtWidgets, QtCore
+else:
+    from PyQt5 import QtWidgets, QtCore
 
 
 class ClangIncludeView(ida_kernwin.PluginForm):
