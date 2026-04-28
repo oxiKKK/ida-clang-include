@@ -36,3 +36,21 @@ COMMON_LANGUAGES = [
     "objective-c",
     "objective-c++",
 ]
+
+# Common language standards shown in the UI. The empty string keeps the field
+# optional and causes no -std flag to be emitted.
+COMMON_STANDARDS = [
+    "",
+    "c89",
+    "c99",
+    "c11",
+    "c17",
+    "c23",
+    "c++03",
+    "c++11",
+    "c++14",
+    "c++17",
+    "c++20",
+    "c++23",
+    "c++26",
+]

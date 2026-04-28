@@ -227,11 +227,11 @@ class ClangIncludeManager(QtCore.QObject):
     def _build_api_parser_args(self, profile: Profile) -> List[str]:
         """Build argv for the IDA parser API.
 
-        A non-empty raw argv field overrides the structured controls because it
-        represents the user's exact desired command line.
+        Raw mode hands the user's argv through verbatim. Structured mode
+        composes argv from the individual profile fields.
         """
 
-        if profile.raw_argv.strip():
+        if profile.input_mode == "raw":
             return self._split_raw_args(profile.raw_argv)
 
         args = self._build_structured_parser_args(profile)
@@ -241,7 +241,7 @@ class ClangIncludeManager(QtCore.QObject):
     def _build_external_parser_args(self, profile: Profile) -> List[str]:
         """Build argv for the external idaclang executable."""
 
-        if profile.raw_argv.strip():
+        if profile.input_mode == "raw":
             return self._split_raw_args(profile.raw_argv)
 
         args = self._build_structured_parser_args(profile)

@@ -7,7 +7,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import ida_kernwin
 import idaapi
 
-from .config import COMMON_LANGUAGES, COMMON_TARGETS, DEFAULT_IDACLANG, PLUGIN_NAME
+from .config import COMMON_LANGUAGES, COMMON_STANDARDS, COMMON_TARGETS, DEFAULT_IDACLANG, PLUGIN_NAME
 from .diff import SyncDiffDialog
 from .manager import ClangIncludeManager
 from .model import Profile
@@ -92,10 +92,10 @@ Use the one umbrella header that represents the type set you want in this IDB. R
 
         target_combo = self._make_editable_combo(COMMON_TARGETS)
         language_combo = self._make_editable_combo(COMMON_LANGUAGES)
-        standard_edit = QtWidgets.QLineEdit()
+        standard_combo = self._make_editable_combo(COMMON_STANDARDS)
         target_combo.lineEdit().setPlaceholderText("Target triplet (leave blank for none)")
         language_combo.lineEdit().setPlaceholderText("Language (leave blank for none)")
-        standard_edit.setPlaceholderText("Language standard, e.g. c11 or c++20 (leave blank for none)")
+        standard_combo.lineEdit().setPlaceholderText("Language standard, e.g. c11 or c++20 (leave blank for none)")
         self._set_help(
             target_combo,
             """Optional target triple passed to the parser, for example i686-pc-windows-msvc or x86_64-pc-windows-msvc.
@@ -109,7 +109,7 @@ Leave it empty to omit -target entirely. This controls ABI-sensitive layout deci
 Leave it empty to omit -x. The API parser still defaults to C++ internally when no language is given.""",
         )
         self._set_help(
-            standard_edit,
+            standard_combo,
             """Optional language standard passed to the parser, for example c++17, c++20, or c11.
 
 Leave it empty to omit -std entirely. Change this if the header depends on syntax or library behavior from a specific language version.""",
@@ -118,8 +118,14 @@ Leave it empty to omit -std entirely. Change this if the header depends on synta
         includes_edit = self._make_large_editor("One include path per line")
         macros_edit = self._make_large_editor("One macro per line, e.g. _WIN32 or FOO=1")
         extra_args_edit = self._make_large_editor("Extra parser args, e.g. -fms-extensions")
-        raw_argv_edit = self._make_large_editor("Optional raw parser argv override")
+        argv_editor = self._make_large_editor(
+            "Edit parser argv directly", read_only=False, no_wrap=False
+        )
         preview_edit = self._make_large_editor("Resolved command preview", read_only=True, no_wrap=False)
+        self._set_help(
+            argv_editor,
+            """Full parser argv. This pane replaces the structured editors while Raw mode is active and is the exact argument list the parser receives.""",
+        )
         self._set_help(
             includes_edit,
             """Additional include search paths, one directory per line.
@@ -139,17 +145,32 @@ Each line becomes a -D argument. You can write bare flags like _WIN32 or assignm
 Use this for switches such as -fms-extensions, warning suppressions, forced compatibility flags, or anything not covered by the UI.""",
         )
         self._set_help(
-            raw_argv_edit,
-            """Full raw parser argument override.
+            preview_edit,
+            """Resolved parser command preview, available in Structured mode only. Raw mode replaces this pane with the editable argv on the left.""",
+        )
 
-When this field is non-empty, Clang Include ignores Target, Language, Std, Includes, Macros, Extra Args, and structured parser options from the Options dialog and uses this exact argument list instead.""",
+        mode_structured_radio = QtWidgets.QRadioButton("Structured")
+        mode_raw_radio = QtWidgets.QRadioButton("Raw argv")
+        mode_button_group = QtWidgets.QButtonGroup(self.parent)
+        mode_button_group.addButton(mode_structured_radio)
+        mode_button_group.addButton(mode_raw_radio)
+        mode_hint = QtWidgets.QLabel("")
+        mode_hint.setWordWrap(True)
+        self._set_help(
+            mode_structured_radio,
+            "Compose argv from the include paths, macros, target, language, std, and extra-args fields.",
         )
         self._set_help(
-            preview_edit,
-            """Read-only preview of the parser command that matches the current engine selection.
-
-Use it to verify include paths, defines, target, and argument ordering before importing.""",
+            mode_raw_radio,
+            "Edit the full parser argv directly in the right pane. Structured fields and parser-options-dialog switches are ignored.",
         )
+        mode_row = QtWidgets.QHBoxLayout()
+        mode_row.setContentsMargins(0, 0, 0, 0)
+        mode_row.setSpacing(8)
+        mode_row.addWidget(QtWidgets.QLabel("Mode:"))
+        mode_row.addWidget(mode_structured_radio)
+        mode_row.addWidget(mode_raw_radio)
+        mode_row.addWidget(mode_hint, 1)
 
         button_row = QtWidgets.QHBoxLayout()
         save_button = QtWidgets.QPushButton("Save")
@@ -194,7 +215,7 @@ This shows status messages, parser execution details, overwrite/skip decisions, 
         settings_layout.addWidget(language_label, 3, 0)
         settings_layout.addWidget(language_combo, 3, 1)
         settings_layout.addWidget(standard_label, 3, 2)
-        settings_layout.addWidget(standard_edit, 3, 3)
+        settings_layout.addWidget(standard_combo, 3, 3)
 
         # The left side contains editable parser inputs. The right side contains
         # derived output and logs so the preview behaves like a companion pane
@@ -204,8 +225,13 @@ This shows status messages, parser execution details, overwrite/skip decisions, 
         editors_tabs.addTab(includes_edit, "Includes")
         editors_tabs.addTab(macros_edit, "Macros")
         editors_tabs.addTab(extra_args_edit, "Extra Args")
-        editors_tabs.addTab(raw_argv_edit, "Raw Argv")
-        editors_tabs.setMinimumWidth(420)
+
+        # The left pane swaps wholesale between the structured editor tabs and
+        # the single argv editor depending on the active mode.
+        left_stack = QtWidgets.QStackedWidget()
+        left_stack.addWidget(editors_tabs)
+        left_stack.addWidget(argv_editor)
+        left_stack.setMinimumWidth(420)
 
         output_tabs = QtWidgets.QTabWidget()
         output_tabs.setDocumentMode(True)
@@ -223,13 +249,9 @@ This shows status messages, parser execution details, overwrite/skip decisions, 
             2,
             "Extra clang arguments. e.g. '-fms-extensions -Wno-some-warning'. See the preview window for a preview.",
         )
-        editors_tabs.setTabToolTip(
-            3,
-            "Full raw parser argument override. When present, it replaces the structured command-building fields.",
-        )
         output_tabs.setTabToolTip(
             0,
-            "Wrapped parser-argument preview showing exactly how the current settings resolve before import.",
+            "Resolved argv in Structured mode (read-only); editable argv in Raw mode.",
         )
         output_tabs.setTabToolTip(
             1,
@@ -237,7 +259,7 @@ This shows status messages, parser execution details, overwrite/skip decisions, 
         )
 
         body_splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
-        body_splitter.addWidget(editors_tabs)
+        body_splitter.addWidget(left_stack)
         body_splitter.addWidget(output_tabs)
         body_splitter.setChildrenCollapsible(False)
         body_splitter.setStretchFactor(0, 3)
@@ -246,6 +268,7 @@ This shows status messages, parser execution details, overwrite/skip decisions, 
         root.addLayout(button_row)
         root.addWidget(status_label)
         root.addWidget(settings_group)
+        root.addLayout(mode_row)
         root.addWidget(body_splitter, 1)
         self.parent.setLayout(root)
 
@@ -260,34 +283,44 @@ This shows status messages, parser execution details, overwrite/skip decisions, 
             "engine": engine_combo,
             "target": target_combo,
             "language": language_combo,
-            "standard": standard_edit,
+            "standard": standard_combo,
             "include_paths": includes_edit,
             "macros": macros_edit,
             "extra_args": extra_args_edit,
-            "raw_argv": raw_argv_edit,
+            "argv_editor": argv_editor,
             "preview": preview_edit,
             "log": log_edit,
             "output_tabs": output_tabs,
+            "left_stack": left_stack,
             "status": status_label,
             "save": save_button,
             "options": options_button,
             "import": import_button,
             "clear_log": clear_log_button,
+            "mode_structured": mode_structured_radio,
+            "mode_raw": mode_raw_radio,
+            "mode_hint": mode_hint,
         }
+        # Field labels we toggle alongside their inputs so they dim too.
+        self._structured_labels = (target_label, language_label, standard_label)
+        # Cached so _on_mode_changed can pre-fill raw_argv from the resolved
+        # structured preview when the user first switches to Raw mode.
+        self._raw_argv_cache = self.manager.profile.raw_argv
 
         save_button.clicked.connect(self._save_profile)
         options_button.clicked.connect(self._open_options)
         import_button.clicked.connect(self._run_sync)
         clear_log_button.clicked.connect(log_edit.clear)
 
-        for key in ("header_path", "idaclang_path", "standard"):
+        for key in ("header_path", "idaclang_path"):
             self._widgets[key].textChanged.connect(self._schedule_preview_refresh)
-        for key in ("target", "language"):
+        for key in ("target", "language", "standard"):
             self._widgets[key].editTextChanged.connect(self._schedule_preview_refresh)
             self._widgets[key].currentIndexChanged.connect(self._schedule_preview_refresh)
-        for key in ("include_paths", "macros", "extra_args", "raw_argv"):
+        for key in ("include_paths", "macros", "extra_args"):
             self._widgets[key].textChanged.connect(self._schedule_preview_refresh)
         engine_combo.currentIndexChanged.connect(self._schedule_preview_refresh)
+        mode_structured_radio.toggled.connect(self._on_mode_changed)
 
     def _make_large_editor(
         self, placeholder: str, read_only: bool = False, no_wrap: bool = True
@@ -350,14 +383,25 @@ This shows status messages, parser execution details, overwrite/skip decisions, 
         self._widgets["idaclang_path"].setText(profile.idaclang_path)
         self._widgets["target"].setCurrentText(profile.target)
         self._widgets["language"].setCurrentText(profile.language)
-        self._widgets["standard"].setText(profile.standard)
+        self._widgets["standard"].setCurrentText(profile.standard)
         self._widgets["include_paths"].setPlainText("\n".join(profile.include_paths))
         self._widgets["macros"].setPlainText("\n".join(profile.macros))
         self._widgets["extra_args"].setPlainText(profile.extra_args)
-        self._widgets["raw_argv"].setPlainText(profile.raw_argv)
         index = self._widgets["engine"].findData(profile.engine)
         if index >= 0:
             self._widgets["engine"].setCurrentIndex(index)
+        self._raw_argv_cache = profile.raw_argv
+        self._widgets["argv_editor"].setPlainText(profile.raw_argv)
+        is_raw = profile.input_mode == "raw"
+        # Block the toggled signal during initial load so we don't trigger the
+        # interactive switch logic before the rest of the form is populated.
+        self._widgets["mode_structured"].blockSignals(True)
+        self._widgets["mode_raw"].blockSignals(True)
+        self._widgets["mode_structured"].setChecked(not is_raw)
+        self._widgets["mode_raw"].setChecked(is_raw)
+        self._widgets["mode_structured"].blockSignals(False)
+        self._widgets["mode_raw"].blockSignals(False)
+        self._apply_mode_ui(is_raw)
         self._suspend_preview_refresh = False
         self._widgets["status"].setText(self._status_text(profile))
         self._refresh_preview()
@@ -365,16 +409,24 @@ This shows status messages, parser execution details, overwrite/skip decisions, 
     def _collect_profile(self) -> Profile:
         """Read the current UI state back into a profile object."""
 
+        is_raw = self._widgets["mode_raw"].isChecked()
+        # In Raw mode the dedicated argv editor IS the argv. In Structured mode
+        # we keep whatever raw_argv the user previously had, so toggling Raw ->
+        # Structured -> Raw round-trips losslessly.
+        raw_argv = (
+            self._widgets["argv_editor"].toPlainText().strip() if is_raw else self._raw_argv_cache
+        )
         return Profile(
             header_path=self._widgets["header_path"].text().strip(),
             idaclang_path=self._widgets["idaclang_path"].text().strip() or str(DEFAULT_IDACLANG),
             target=self._widgets["target"].currentText().strip(),
             language=self._widgets["language"].currentText().strip(),
-            standard=self._widgets["standard"].text().strip(),
+            standard=self._widgets["standard"].currentText().strip(),
             include_paths=self._split_lines(self._widgets["include_paths"].toPlainText()),
             macros=self._split_lines(self._widgets["macros"].toPlainText()),
             extra_args=self._widgets["extra_args"].toPlainText().strip(),
-            raw_argv=self._widgets["raw_argv"].toPlainText().strip(),
+            raw_argv=raw_argv,
+            input_mode="raw" if is_raw else "structured",
             engine=self._widgets["engine"].currentData(),
             auto_engine_order=self.manager.profile.auto_engine_order,
             log_external_output=self.manager.profile.log_external_output,
@@ -483,16 +535,97 @@ This shows status messages, parser execution details, overwrite/skip decisions, 
         ida_kernwin.warning(f"{PLUGIN_NAME}: {title}.\n\n{message}")
 
     def _refresh_preview(self, update_status: bool = True) -> None:
-        """Refresh the derived command preview and status summary."""
+        """Refresh the derived command preview and status summary.
+
+        In Raw mode the preview pane is the argv input itself, so we leave it
+        alone; only the status line gets recomputed.
+        """
 
         profile = self._collect_profile()
-        try:
-            preview = self.manager.build_preview_command(profile)
-        except Exception as exc:
-            preview = f"Failed to build preview: {exc}"
-        self._widgets["preview"].setPlainText(preview)
+        if profile.input_mode != "raw":
+            try:
+                preview = self.manager.build_preview_command(profile)
+            except Exception as exc:
+                preview = f"Failed to build preview: {exc}"
+            self._widgets["preview"].setPlainText(preview)
         if update_status:
             self._widgets["status"].setText(self._status_text(profile))
+
+    def _on_mode_changed(self, _checked: bool) -> None:
+        """React to the user toggling Structured vs Raw mode."""
+
+        if self._suspend_preview_refresh:
+            return
+
+        is_raw = self._widgets["mode_raw"].isChecked()
+        if is_raw:
+            # Seed the argv editor: prefer the user's previous raw text, fall
+            # back to the currently-resolved structured argv as a starting
+            # point so they don't have to type from scratch.
+            seed = self._raw_argv_cache.strip()
+            if not seed:
+                profile = self._collect_profile_for_preview_only()
+                try:
+                    seed = self.manager.build_preview_command(profile)
+                except Exception:
+                    seed = ""
+            self._widgets["argv_editor"].setPlainText(seed)
+        else:
+            # Leaving Raw mode: capture the user's edits so a later toggle back
+            # to Raw restores them.
+            self._raw_argv_cache = self._widgets["argv_editor"].toPlainText().strip()
+        self._apply_mode_ui(is_raw)
+        self._refresh_preview()
+
+    def _collect_profile_for_preview_only(self) -> Profile:
+        """Snapshot the form as if it were Structured mode, for argv seeding."""
+
+        # Force structured mode + empty raw_argv so build_preview_command
+        # returns the resolved structured argv regardless of current state.
+        profile = self._collect_profile()
+        profile.input_mode = "structured"
+        profile.raw_argv = ""
+        return profile
+
+    def _apply_mode_ui(self, is_raw: bool) -> None:
+        """Reshape the panes and disable/enable inputs for the active mode."""
+
+        # Top-row structured fields stay visible but dim in Raw mode.
+        for key in ("target", "language", "standard"):
+            self._widgets[key].setEnabled(not is_raw)
+        for label in self._structured_labels:
+            label.setEnabled(not is_raw)
+
+        # Left pane: structured tabs vs single argv editor.
+        self._widgets["left_stack"].setCurrentIndex(1 if is_raw else 0)
+
+        # Right pane: drop the Preview tab in Raw mode (the argv lives on the
+        # left there); restore it when returning to Structured. removeTab does
+        # not destroy the widget, so the cached preview_edit reference stays
+        # valid.
+        output_tabs = self._widgets["output_tabs"]
+        preview = self._widgets["preview"]
+        preview_index = output_tabs.indexOf(preview)
+        if is_raw and preview_index >= 0:
+            output_tabs.removeTab(preview_index)
+        elif not is_raw and preview_index < 0:
+            output_tabs.insertTab(0, preview, "Preview")
+            output_tabs.setTabToolTip(
+                0, "Resolved argv preview (read-only)."
+            )
+
+        self._widgets["mode_hint"].setText(
+            "Structured fields are ignored. Edit the argv in the left pane."
+            if is_raw
+            else ""
+        )
+
+        # Bring the relevant pane on the right to the front so the user can
+        # see what just changed (Preview in Structured, Log in Raw).
+        if is_raw:
+            output_tabs.setCurrentWidget(self._widgets["log"])
+        else:
+            output_tabs.setCurrentWidget(preview)
 
     def _schedule_preview_refresh(self, *_args: Any) -> None:
         """Coalesce field edits so the preview updates immediately and consistently."""
