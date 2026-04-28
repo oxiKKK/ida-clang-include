@@ -1,3 +1,44 @@
+[project]
+name = "ida-clang-include"
+version = "1.1.0"
+description = "IDA Pro plugin for importing C/C++ headers into Local Types with clang-compatible parsing."
+readme = "README.md"
+requires-python = ">=3.13"
+license = { text = "MIT" }
+authors = [
+    { name = "oxiKKK", email = "oxsscze@gmail.com" },
+]
+keywords = [
+    "ida-pro",
+    "clang",
+    "idaclang",
+    "local-types",
+    "c",
+    "c++",
+    "headers",
+    "type-import",
+]
+
+# Runtime imports come from IDA's bundled Python (ida_*, PyQt5, PySide6).
+# None are installable from PyPI, so the runtime dependency list is empty
+# on purpose. Add nothing here unless it can be pip-installed.
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/oxiKKK/ida-clang-include"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.6",
+    "pre-commit>=3.7",
+]
+
+# This project ships as an IDA plugin tree, not a pip-installable wheel,
+# so disable uv's package-build behaviour. `uv sync` still works for
+# managing the dev environment.
+[tool.uv]
+package = false
+
 [tool.ruff]
 line-length = 120
 target-version = "py313"

@@ -29,6 +29,7 @@ class Profile:
     macros: List[str] = None
     extra_args: str = ""
     raw_argv: str = ""
+    input_mode: str = "structured"
     engine: str = "auto"
     auto_engine_order: str = "api_first"
     log_external_output: bool = True
@@ -76,6 +77,10 @@ class Profile:
             if key in field_names:
                 setattr(merged, key, value)
         merged.__post_init__()
+        # Pre-input_mode profiles relied on raw_argv non-emptiness to mean
+        # "use raw". Promote that implicit signal to the explicit field.
+        if "input_mode" not in data and merged.raw_argv.strip():
+            merged.input_mode = "raw"
         return merged
 
 

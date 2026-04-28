@@ -10,12 +10,19 @@ from typing import Any, List, Optional, Sequence
 import ida_auto
 import ida_kernwin
 import ida_loader
-import ida_srclang
 import ida_typeinf
-from PySide6 import QtCore
+import idaapi
 
+from . import compat
 from .config import DEFAULT_IDACLANG, PLUGIN_NAME
 from .model import Profile, SettingsStore
+
+if idaapi.IDA_SDK_VERSION >= 920:
+    from PySide6 import QtCore
+    from PySide6.QtCore import Signal
+else:
+    from PyQt5 import QtCore
+    from PyQt5.QtCore import pyqtSignal as Signal
 
 
 class ClangIncludeError(RuntimeError):
@@ -64,8 +71,8 @@ class PreparedSync:
 class ClangIncludeManager(QtCore.QObject):
     """Coordinates parsing, conflict handling, and Local Types updates."""
 
-    log_message = QtCore.Signal(str)
-    profile_changed = QtCore.Signal(object)
+    log_message = Signal(str)
+    profile_changed = Signal(object)
 
     def __init__(self) -> None:
         super().__init__()
@@ -220,11 +227,11 @@ class ClangIncludeManager(QtCore.QObject):
     def _build_api_parser_args(self, profile: Profile) -> List[str]:
         """Build argv for the IDA parser API.
 
-        A non-empty raw argv field overrides the structured controls because it
-        represents the user's exact desired command line.
+        Raw mode hands the user's argv through verbatim. Structured mode
+        composes argv from the individual profile fields.
         """
 
-        if profile.raw_argv.strip():
+        if profile.input_mode == "raw":
             return self._split_raw_args(profile.raw_argv)
 
         args = self._build_structured_parser_args(profile)
@@ -234,7 +241,7 @@ class ClangIncludeManager(QtCore.QObject):
     def _build_external_parser_args(self, profile: Profile) -> List[str]:
         """Build argv for the external idaclang executable."""
 
-        if profile.raw_argv.strip():
+        if profile.input_mode == "raw":
             return self._split_raw_args(profile.raw_argv)
 
         args = self._build_structured_parser_args(profile)
@@ -333,24 +340,8 @@ class ClangIncludeManager(QtCore.QObject):
     def _parse_with_api(self, profile: Profile) -> Any:
         """Use IDA's in-process source parser to build a temporary TIL."""
 
-        language = (profile.language or "c++").lower()
-        if language in ("c", "objc"):
-            srclang = ida_srclang.SRCLANG_C if language == "c" else ida_srclang.SRCLANG_OBJC
-        elif language in ("objective-c++", "objcpp", "objc++"):
-            srclang = ida_srclang.SRCLANG_OBJCPP
-        else:
-            srclang = ida_srclang.SRCLANG_CPP
-
-        if not ida_srclang.select_parser_by_srclang(srclang):
-            raise ClangIncludeError(f"No source parser is available in ida_srclang for language: {profile.language}")
-        parser_name = ida_srclang.get_selected_parser_name()
-        if not parser_name:
-            raise ClangIncludeError("ida_srclang did not return a parser name.")
-
+        srclang = compat.srclang_for(profile.language)
         argv = subprocess.list2cmdline(self._build_api_parser_args(profile))
-        rc = ida_srclang.set_parser_argv(parser_name, argv)
-        if rc != 0:
-            raise ClangIncludeError(f"set_parser_argv failed with code {rc} for parser {parser_name}.")
 
         # Parse into a temporary TIL first. Only after a fully successful parse
         # do we touch the IDB's Local Types.
@@ -358,7 +349,12 @@ class ClangIncludeManager(QtCore.QObject):
             "clang_include_api",
             "Clang Include API parse result",
         )
-        err_count = ida_srclang.parse_decls_with_parser(parser_name, temp_til, profile.header_path, True)
+        try:
+            parser_name, err_count = compat.parse_with_srclang(srclang, argv, temp_til, profile.header_path)
+        except compat.CompatError as exc:
+            ida_typeinf.free_til(temp_til)
+            raise ClangIncludeError(str(exc))
+
         if err_count < 0:
             ida_typeinf.free_til(temp_til)
             raise ClangIncludeError(f"ida_srclang parser {parser_name} was not available.")
@@ -484,7 +480,7 @@ class ClangIncludeManager(QtCore.QObject):
     ) -> SyncPlan:
         """Compute the Local Types changes implied by the parsed source TIL."""
 
-        source_names = sorted(source_til.type_names)
+        source_names = sorted(compat.til_type_names(source_til))
         if not source_names:
             raise ClangIncludeError("Parser succeeded but produced no named types.")
 
@@ -615,10 +611,16 @@ class ClangIncludeManager(QtCore.QObject):
 
         idati = ida_typeinf.get_idati()
 
+        failed: List[str] = []
+
         for change in plan.changes:
             if change.action == "delete" and self._type_exists(idati, change.name):
-                ida_typeinf.del_named_type(idati, change.name, ida_typeinf.NTF_TYPE)
-                self.log(f"Deleted stale managed type: {change.name}")
+                try:
+                    ida_typeinf.del_named_type(idati, change.name, ida_typeinf.NTF_TYPE)
+                    self.log(f"Deleted stale managed type: {change.name}")
+                except Exception as exc:
+                    failed.append(change.name)
+                    self.log(f"Failed to delete {change.name}: {exc}")
 
         for change in plan.changes:
             if change.action not in ("create", "replace"):
@@ -635,9 +637,19 @@ class ClangIncludeManager(QtCore.QObject):
                 self.log(f"Creating Local Type shadow for existing base/library type: {change.name}")
             else:
                 self.log(f"Creating Local Type: {change.name}")
-            self._write_named_type(idati, source_til, change.name, replace=replace)
+            try:
+                self._write_named_type(idati, source_til, change.name, replace=replace)
+            except Exception as exc:
+                failed.append(change.name)
+                self.log(f"Failed on {change.name}: {exc}")
 
-        return list(plan.resulting_type_names)
+        if failed:
+            preview = ", ".join(failed[:5])
+            suffix = "" if len(failed) <= 5 else f" (+{len(failed) - 5} more)"
+            self.log(f"Import completed with {len(failed)} failure(s): {preview}{suffix}")
+
+        failed_set = set(failed)
+        return [name for name in plan.resulting_type_names if name not in failed_set]
 
     def _type_exists(self, til: Any, name: str) -> bool:
         """Check whether a named type already exists in the given type library."""
@@ -653,14 +665,7 @@ class ClangIncludeManager(QtCore.QObject):
     def _get_local_type_ordinal(self, til: Any, name: str) -> int:
         """Resolve the local ordinal for one named type, if it exists locally."""
 
-        ordinal = int(ida_typeinf.get_type_ordinal(til, name) or 0)
-        if ordinal > 0:
-            return ordinal
-
-        tid = int(ida_typeinf.get_named_type_tid(name) or ida_typeinf.BADORD)
-        if tid in (ida_typeinf.BADORD, 0):
-            return 0
-        return int(ida_typeinf.get_tid_ordinal(tid) or 0)
+        return compat.local_type_ordinal(til, name)
 
     def _get_named_type_decl(self, til: Any, name: str) -> str:
         """Return a best-effort declaration string for one named type."""
@@ -730,12 +735,7 @@ class ClangIncludeManager(QtCore.QObject):
             self._replace_named_type_in_place(target_til, source_til, name)
             return
 
-        tif = ida_typeinf.tinfo_t()
-        if not tif.get_named_type(source_til, name):
-            raise ClangIncludeError(f"Failed to read parsed type: {name}")
-
-        imported_tif = target_til.import_type(tif)
-        if not imported_tif:
+        if not compat.import_named_type(target_til, source_til, name):
             action = "replace" if replace else "create"
             raise ClangIncludeError(f"Failed to {action} type {name}: import_type")
 
@@ -772,5 +772,5 @@ class ClangIncludeManager(QtCore.QObject):
             sclass,
         )
         if result != ida_typeinf.TERR_OK:
-            error_text = ida_typeinf.tinfo_errstr(result) or str(result)
+            error_text = compat.tinfo_errstr(result)
             raise ClangIncludeError(f"Failed to update type {name} in place: {error_text}")
