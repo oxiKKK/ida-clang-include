@@ -118,9 +118,7 @@ Leave it empty to omit -std entirely. Change this if the header depends on synta
         includes_edit = self._make_large_editor("One include path per line")
         macros_edit = self._make_large_editor("One macro per line, e.g. _WIN32 or FOO=1")
         extra_args_edit = self._make_large_editor("Extra parser args, e.g. -fms-extensions")
-        argv_editor = self._make_large_editor(
-            "Edit parser argv directly", read_only=False, no_wrap=False
-        )
+        argv_editor = self._make_large_editor("Edit parser argv directly", read_only=False, no_wrap=False)
         preview_edit = self._make_large_editor("Resolved command preview", read_only=True, no_wrap=False)
         self._set_help(
             argv_editor,
@@ -413,9 +411,7 @@ This shows status messages, parser execution details, overwrite/skip decisions, 
         # In Raw mode the dedicated argv editor IS the argv. In Structured mode
         # we keep whatever raw_argv the user previously had, so toggling Raw ->
         # Structured -> Raw round-trips losslessly.
-        raw_argv = (
-            self._widgets["argv_editor"].toPlainText().strip() if is_raw else self._raw_argv_cache
-        )
+        raw_argv = self._widgets["argv_editor"].toPlainText().strip() if is_raw else self._raw_argv_cache
         return Profile(
             header_path=self._widgets["header_path"].text().strip(),
             idaclang_path=self._widgets["idaclang_path"].text().strip() or str(DEFAULT_IDACLANG),
@@ -610,14 +606,10 @@ This shows status messages, parser execution details, overwrite/skip decisions, 
             output_tabs.removeTab(preview_index)
         elif not is_raw and preview_index < 0:
             output_tabs.insertTab(0, preview, "Preview")
-            output_tabs.setTabToolTip(
-                0, "Resolved argv preview (read-only)."
-            )
+            output_tabs.setTabToolTip(0, "Resolved argv preview (read-only).")
 
         self._widgets["mode_hint"].setText(
-            "Structured fields are ignored. Edit the argv in the left pane."
-            if is_raw
-            else ""
+            "Structured fields are ignored. Edit the argv in the left pane." if is_raw else ""
         )
 
         # Bring the relevant pane on the right to the front so the user can

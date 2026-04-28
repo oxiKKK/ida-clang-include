@@ -16,9 +16,7 @@ import ida_typeinf
 _HAS_TIL_TYPE_NAMES = hasattr(ida_typeinf.til_t, "type_names")
 _HAS_TIL_IMPORT_TYPE_METHOD = hasattr(ida_typeinf.til_t, "import_type")
 _HAS_TINFO_ERRSTR = hasattr(ida_typeinf, "tinfo_errstr")
-_HAS_NAMED_TYPE_TID = hasattr(ida_typeinf, "get_named_type_tid") and hasattr(
-    ida_typeinf, "get_tid_ordinal"
-)
+_HAS_NAMED_TYPE_TID = hasattr(ida_typeinf, "get_named_type_tid") and hasattr(ida_typeinf, "get_tid_ordinal")
 _HAS_SRCLANG_OBJCPP = hasattr(ida_srclang, "SRCLANG_OBJCPP")
 _HAS_SELECTED_PARSER_NAME = hasattr(ida_srclang, "get_selected_parser_name")
 
@@ -128,9 +126,7 @@ def parse_with_srclang(
     """
 
     if not ida_srclang.select_parser_by_srclang(srclang):
-        raise CompatError(
-            f"No source parser is available in ida_srclang for srclang {srclang}."
-        )
+        raise CompatError(f"No source parser is available in ida_srclang for srclang {srclang}.")
 
     if _HAS_SELECTED_PARSER_NAME:
         parser_name = ida_srclang.get_selected_parser_name()
@@ -141,9 +137,7 @@ def parse_with_srclang(
 
     rc = ida_srclang.set_parser_argv(parser_name, argv)
     if rc != 0:
-        raise CompatError(
-            f"set_parser_argv failed with code {rc} for parser {parser_name}."
-        )
+        raise CompatError(f"set_parser_argv failed with code {rc} for parser {parser_name}.")
 
     err_count = ida_srclang.parse_decls_with_parser(parser_name, til, header_path, True)
     return parser_name, err_count

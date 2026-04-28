@@ -350,9 +350,7 @@ class ClangIncludeManager(QtCore.QObject):
             "Clang Include API parse result",
         )
         try:
-            parser_name, err_count = compat.parse_with_srclang(
-                srclang, argv, temp_til, profile.header_path
-            )
+            parser_name, err_count = compat.parse_with_srclang(srclang, argv, temp_til, profile.header_path)
         except compat.CompatError as exc:
             ida_typeinf.free_til(temp_til)
             raise ClangIncludeError(str(exc))

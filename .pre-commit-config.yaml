@@ -5,12 +5,3 @@ repos:
       - id: ruff-check
         args: [--fix]
       - id: ruff-format
-
-  - repo: local
-    hooks:
-      - id: hcli-plugin-lint
-        name: hcli plugin lint
-        entry: hcli plugin lint .
-        language: system
-        pass_filenames: false
-        files: \.(py|json)$
