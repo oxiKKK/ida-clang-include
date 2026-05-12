@@ -1,6 +1,6 @@
 [project]
 name = "ida-clang-include"
-version = "1.1.0"
+version = "1.2.0"
 description = "IDA Pro plugin for importing C/C++ headers into Local Types with clang-compatible parsing."
 readme = "README.md"
 requires-python = ">=3.13"

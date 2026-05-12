@@ -170,6 +170,41 @@ Use this for switches such as -fms-extensions, warning suppressions, forced comp
         mode_row.addWidget(mode_raw_radio)
         mode_row.addWidget(mode_hint, 1)
 
+        profile_row = QtWidgets.QHBoxLayout()
+        profile_combo = QtWidgets.QComboBox()
+        profile_combo.setEditable(True)
+        profile_combo.setInsertPolicy(QtWidgets.QComboBox.NoInsert)
+        profile_combo.lineEdit().setPlaceholderText("Pick a profile, or type a new name to create one")
+        profile_combo.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToContents)
+        profile_load_button = QtWidgets.QPushButton("Load")
+        profile_save_button = QtWidgets.QPushButton("Save")
+        profile_remove_button = QtWidgets.QPushButton("Remove")
+        self._set_help(
+            profile_combo,
+            """Cross-IDB profiles stored on disk under the IDA user dir.
+
+Pick an existing profile to Load/Remove, or type a new name and hit Save to create one. The list is the same across every IDB on this machine.""",
+        )
+        self._set_help(
+            profile_load_button,
+            "Apply the selected global profile to the current IDB. Per-IDB state (managed type names, last engine used) is preserved.",
+        )
+        self._set_help(
+            profile_save_button,
+            """Save the current settings as a global profile under the name shown to the left.
+
+If the name matches an existing profile it is overwritten after confirmation. Otherwise a new profile is created.""",
+        )
+        self._set_help(
+            profile_remove_button,
+            "Delete the selected global profile from disk. The current IDB's settings are not changed.",
+        )
+        profile_row.addWidget(QtWidgets.QLabel("Profile:"))
+        profile_row.addWidget(profile_combo, 1)
+        profile_row.addWidget(profile_load_button)
+        profile_row.addWidget(profile_save_button)
+        profile_row.addWidget(profile_remove_button)
+
         button_row = QtWidgets.QHBoxLayout()
         save_button = QtWidgets.QPushButton("Save")
         options_button = QtWidgets.QPushButton("Options")
@@ -263,6 +298,7 @@ This shows status messages, parser execution details, overwrite/skip decisions, 
         body_splitter.setStretchFactor(0, 3)
         body_splitter.setStretchFactor(1, 2)
 
+        root.addLayout(profile_row)
         root.addLayout(button_row)
         root.addWidget(status_label)
         root.addWidget(settings_group)
@@ -298,6 +334,10 @@ This shows status messages, parser execution details, overwrite/skip decisions, 
             "mode_structured": mode_structured_radio,
             "mode_raw": mode_raw_radio,
             "mode_hint": mode_hint,
+            "profile_combo": profile_combo,
+            "profile_load": profile_load_button,
+            "profile_save": profile_save_button,
+            "profile_remove": profile_remove_button,
         }
         # Field labels we toggle alongside their inputs so they dim too.
         self._structured_labels = (target_label, language_label, standard_label)
@@ -309,6 +349,12 @@ This shows status messages, parser execution details, overwrite/skip decisions, 
         options_button.clicked.connect(self._open_options)
         import_button.clicked.connect(self._run_sync)
         clear_log_button.clicked.connect(log_edit.clear)
+        profile_load_button.clicked.connect(self._load_global_profile)
+        profile_save_button.clicked.connect(self._save_global_profile)
+        profile_remove_button.clicked.connect(self._remove_global_profile)
+        profile_combo.editTextChanged.connect(self._refresh_profile_buttons)
+        profile_combo.currentIndexChanged.connect(self._refresh_profile_buttons)
+        self._refresh_profile_list()
 
         for key in ("header_path", "idaclang_path"):
             self._widgets[key].textChanged.connect(self._schedule_preview_refresh)
@@ -472,6 +518,108 @@ This shows status messages, parser execution details, overwrite/skip decisions, 
         updated = dialog.apply_to_profile(profile)
         self.manager.save_profile(updated)
         self._load_profile(updated)
+
+    def _refresh_profile_list(self, select_name: Optional[str] = None) -> None:
+        """Repopulate the global-profile combobox from disk."""
+
+        combo = self._widgets["profile_combo"]
+        previous = select_name if select_name is not None else combo.currentText()
+        try:
+            names = self.manager.list_global_profiles()
+        except Exception as exc:
+            self._append_log(f"Failed to list global profiles: {exc}")
+            names = []
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItems(names)
+        if previous:
+            idx = combo.findText(previous)
+            if idx >= 0:
+                combo.setCurrentIndex(idx)
+            else:
+                combo.setEditText(previous)
+        else:
+            combo.setEditText("")
+        combo.blockSignals(False)
+        self._refresh_profile_buttons()
+
+    def _refresh_profile_buttons(self, *_args: Any) -> None:
+        """Enable/disable Load/Save/Remove based on the current combobox text.
+
+        Load/Remove require an exact match with a saved profile. Save just
+        requires a non-empty name; whether it overwrites or creates is decided
+        at click time.
+        """
+
+        combo = self._widgets["profile_combo"]
+        text = combo.currentText().strip()
+        is_saved = bool(text) and combo.findText(text) >= 0
+        self._widgets["profile_load"].setEnabled(is_saved)
+        self._widgets["profile_remove"].setEnabled(is_saved)
+        self._widgets["profile_save"].setEnabled(bool(text))
+
+    def _load_global_profile(self) -> None:
+        """Apply the selected global profile to the current IDB."""
+
+        name = self._widgets["profile_combo"].currentText().strip()
+        if not name:
+            return
+        confirm = ida_kernwin.ask_yn(
+            ida_kernwin.ASKBTN_NO,
+            f"Are you sure? Loading {name!r} will overwrite this IDB's current settings.",
+        )
+        if confirm != ida_kernwin.ASKBTN_YES:
+            return
+        try:
+            self.manager.apply_global_profile(name)
+        except Exception as exc:
+            self._notify_failure("Load global profile failed", exc)
+            return
+        self._load_profile(self.manager.profile)
+
+    def _save_global_profile(self) -> None:
+        """Save the current UI state as a global profile under the typed name."""
+
+        combo = self._widgets["profile_combo"]
+        name = combo.currentText().strip()
+        if not name:
+            return
+
+        is_overwrite = combo.findText(name) >= 0
+        if is_overwrite:
+            confirm = ida_kernwin.ask_yn(
+                ida_kernwin.ASKBTN_YES,
+                f"Overwrite global profile {name!r}?",
+            )
+            if confirm != ida_kernwin.ASKBTN_YES:
+                return
+
+        try:
+            profile = self._collect_profile()
+            self.manager.save_global_profile(name, profile)
+        except Exception as exc:
+            self._notify_failure("Save global profile failed", exc)
+            return
+        self._refresh_profile_list(select_name=name)
+
+    def _remove_global_profile(self) -> None:
+        """Delete the selected global profile from disk."""
+
+        name = self._widgets["profile_combo"].currentText().strip()
+        if not name:
+            return
+        confirm = ida_kernwin.ask_yn(
+            ida_kernwin.ASKBTN_NO,
+            f"Are you sure? This will permanently delete global profile {name!r} from disk.",
+        )
+        if confirm != ida_kernwin.ASKBTN_YES:
+            return
+        try:
+            self.manager.delete_global_profile(name)
+        except Exception as exc:
+            self._notify_failure("Delete global profile failed", exc)
+            return
+        self._refresh_profile_list(select_name="")
 
     def _run_sync(self) -> None:
         """Execute one parse/import cycle from the current form values."""

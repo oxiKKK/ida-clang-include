@@ -16,6 +16,7 @@ import idaapi
 from . import compat
 from .config import DEFAULT_IDACLANG, PLUGIN_NAME
 from .model import Profile, SettingsStore
+from .profiles import PER_IDB_RUNTIME_FIELDS, GlobalProfileStore
 
 if idaapi.IDA_SDK_VERSION >= 920:
     from PySide6 import QtCore
@@ -77,6 +78,7 @@ class ClangIncludeManager(QtCore.QObject):
     def __init__(self) -> None:
         super().__init__()
         self._store = SettingsStore()
+        self._global_store = GlobalProfileStore()
         self._profile = self._store.load()
 
     @property
@@ -93,6 +95,38 @@ class ClangIncludeManager(QtCore.QObject):
         self._store.save(profile)
         self.profile_changed.emit(profile)
         self.log("Saved profile to IDB.")
+
+    def list_global_profiles(self) -> List[str]:
+        """Return the display names of profiles available on disk."""
+
+        return self._global_store.list_names()
+
+    def save_global_profile(self, name: str, profile: Profile) -> None:
+        """Save the given profile snapshot as a named global profile."""
+
+        path = self._global_store.save(name, profile)
+        self.log(f"Saved global profile {name!r} to {path}")
+
+    def delete_global_profile(self, name: str) -> None:
+        """Remove the named global profile from disk."""
+
+        self._global_store.delete(name)
+        self.log(f"Deleted global profile {name!r}.")
+
+    def apply_global_profile(self, name: str) -> None:
+        """Load a global profile and merge it into the current IDB profile.
+
+        Per-IDB runtime state (managed types, last engine used) is preserved
+        from the current profile so loading a template never destroys what
+        this IDB has already imported.
+        """
+
+        loaded = self._global_store.load(name)
+        merged = loaded
+        for field in PER_IDB_RUNTIME_FIELDS:
+            setattr(merged, field, getattr(self._profile, field))
+        self.save_profile(merged)
+        self.log(f"Loaded global profile {name!r}.")
 
     def sync(self, profile: Profile) -> SyncResult:
         """Run one full parse-and-apply cycle.
