@@ -1,5 +1,6 @@
 """Dockable Qt view for configuring and running Clang Include imports."""
 
+import copy
 import traceback
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -9,6 +10,8 @@ import idaapi
 
 from .config import COMMON_LANGUAGES, COMMON_STANDARDS, COMMON_TARGETS, DEFAULT_IDACLANG, PLUGIN_NAME
 from .diff import SyncDiffDialog
+from .macro_enum_dialog import MacroEnumDialog
+from .macro_grouping import suggest_macro_groups
 from .manager import ClangIncludeManager
 from .model import Profile
 from .options import OptionsDialog
@@ -493,7 +496,13 @@ This shows status messages, parser execution details, overwrite/skip decisions, 
             delete_missing_managed_types=self.manager.profile.delete_missing_managed_types,
             clear_log_before_import=self.manager.profile.clear_log_before_import,
             show_success_dialog=self.manager.profile.show_success_dialog,
+            import_numeric_macros=self.manager.profile.import_numeric_macros,
+            macro_conversion_mode=self.manager.profile.macro_conversion_mode,
+            macro_clang_path=self.manager.profile.macro_clang_path,
+            macro_enum_definitions=copy.deepcopy(self.manager.profile.macro_enum_definitions),
+            auto_detect_macro_groups=self.manager.profile.auto_detect_macro_groups,
             managed_type_names=list(self.manager.profile.managed_type_names),
+            managed_macro_enums=dict(self.manager.profile.managed_macro_enums),
             last_engine_used=self.manager.profile.last_engine_used,
         )
 
@@ -515,7 +524,11 @@ This shows status messages, parser execution details, overwrite/skip decisions, 
         dialog = OptionsDialog(profile, self.parent)
         if dialog.exec() != QtWidgets.QDialog.Accepted:
             return
-        updated = dialog.apply_to_profile(profile)
+        try:
+            updated = dialog.apply_to_profile(profile)
+        except Exception as exc:
+            self._notify_failure("Invalid options", exc)
+            return
         self.manager.save_profile(updated)
         self._load_profile(updated)
 
@@ -632,7 +645,32 @@ This shows status messages, parser execution details, overwrite/skip decisions, 
 
             ida_kernwin.show_wait_box("HIDECANCEL\nClang Include: parsing headers and preparing change preview...")
             prepared = self.manager.prepare_sync(profile)
+            if profile.import_numeric_macros:
+                suggestions = []
+                if profile.auto_detect_macro_groups and prepared.numeric_macros:
+                    suggestions = suggest_macro_groups(
+                        (macro.name for macro in prepared.numeric_macros),
+                    )
+                enum_workspace = MacroEnumDialog(
+                    profile.macro_enum_definitions,
+                    suggestions,
+                    prepared.numeric_macros,
+                    self.parent,
+                )
+                ida_kernwin.hide_wait_box()
+                if enum_workspace.exec() != QtWidgets.QDialog.Accepted:
+                    self.manager.log("Import canceled from macro enum dialog.")
+                    self.manager.release_prepared_sync(prepared)
+                    prepared = None
+                    return
+                profile.macro_enum_definitions = enum_workspace.enum_definitions()
+                self.manager.save_profile(profile)
+                ida_kernwin.show_wait_box("HIDECANCEL\nClang Include: rebuilding macro enum preview...")
+                self.manager.rebuild_prepared_sync(profile, prepared)
         except Exception as exc:
+            if prepared is not None:
+                self.manager.release_prepared_sync(prepared)
+                prepared = None
             self._append_log(traceback.format_exc())
             self._notify_failure("Parsing failed", exc)
             return
@@ -649,11 +687,13 @@ This shows status messages, parser execution details, overwrite/skip decisions, 
             ida_kernwin.show_wait_box("HIDECANCEL\nClang Include: applying previewed Local Types changes...")
             result = self.manager.apply_prepared_sync(profile, prepared)
             self._widgets["status"].setText(
-                f"Last import used {self.manager._engine_label(result.engine)}. Managed types: {len(result.type_names)}"
+                f"Last import used {self.manager._engine_label(result.engine)}. "
+                f"Managed types: {len(result.type_names)}. Macro enums: {len(profile.managed_macro_enums)}"
             )
             if profile.show_success_dialog:
                 ida_kernwin.info(
-                    f"{PLUGIN_NAME} imported {len(result.type_names)} managed types using {self.manager._engine_label(result.engine)}."
+                    f"{PLUGIN_NAME} imported {len(result.type_names)} managed types and "
+                    f"{len(profile.managed_macro_enums)} macro enum(s) using {self.manager._engine_label(result.engine)}."
                 )
         except Exception as exc:
             apply_failed = True
@@ -778,15 +818,19 @@ This shows status messages, parser execution details, overwrite/skip decisions, 
         """Build the one-line status summary shown above the settings."""
 
         managed = len(profile.managed_type_names)
+        managed_macros = len(profile.managed_macro_enums)
+        conversion = f"on ({profile.macro_conversion_mode})" if profile.import_numeric_macros else "off"
         policy = self._policy_label(profile.existing_type_policy)
         stale_mode = "delete stale" if profile.delete_missing_managed_types else "keep stale"
         if profile.last_engine_used:
             return (
-                f"Managed types: {managed}. Last engine: {self.manager._engine_label(profile.last_engine_used)}. "
+                f"Managed types: {managed}. Macro enums: {managed_macros}. Conversion: {conversion}. "
+                f"Last engine: {self.manager._engine_label(profile.last_engine_used)}. "
                 f"Existing-type policy: {policy}. {stale_mode}."
             )
         return (
-            f"Managed types: {managed}. Engine: {self.manager._engine_label(profile.engine)}. "
+            f"Managed types: {managed}. Macro enums: {managed_macros}. Conversion: {conversion}. "
+            f"Engine: {self.manager._engine_label(profile.engine)}. "
             f"Existing-type policy: {policy}. {stale_mode}."
         )
 

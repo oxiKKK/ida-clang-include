@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.13"
 
 [[package]]
@@ -31,7 +31,7 @@ wheels = [
 
 [[package]]
 name = "ida-clang-include"
-version = "1.2.0"
+version = "1.3.0"
 source = { virtual = "." }
 
 [package.dev-dependencies]

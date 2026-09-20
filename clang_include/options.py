@@ -9,8 +9,14 @@ from .model import Profile
 
 if idaapi.IDA_SDK_VERSION >= 920:
     from PySide6 import QtWidgets
+
+    DIALOG_CANCEL = QtWidgets.QDialogButtonBox.StandardButton.Cancel
+    DIALOG_OK = QtWidgets.QDialogButtonBox.StandardButton.Ok
 else:
     from PyQt5 import QtWidgets
+
+    DIALOG_CANCEL = QtWidgets.QDialogButtonBox.Cancel
+    DIALOG_OK = QtWidgets.QDialogButtonBox.Ok
 
 PARSER_VALUE_FIELDS = (
     (
@@ -180,6 +186,58 @@ Disable this if you prefer a quieter workflow and rely on the status line and lo
         behavior_form.addRow("", show_success)
         tabs.addTab(behavior_tab, "Behavior")
 
+        enum_tab = QtWidgets.QWidget()
+        enum_layout = QtWidgets.QVBoxLayout(enum_tab)
+        enum_layout.setContentsMargins(12, 12, 12, 12)
+        enum_enabled = QtWidgets.QCheckBox("Enable the Macro Enum Workspace during import")
+        enum_note = QtWidgets.QLabel(
+            "Build named enum types from detected groups, selected source macros, or custom integer values. "
+            "Only enums explicitly placed in the macro workspace are imported."
+        )
+        enum_note.setWordWrap(True)
+        python_mode = QtWidgets.QRadioButton("Python parsing (fast)")
+        python_help = QtWidgets.QLabel(
+            "Scans headers directly without launching another process. Supports simple integer literals."
+        )
+        python_help.setWordWrap(True)
+        clang_mode = QtWidgets.QRadioButton("Clang (more reliable)")
+        clang_help = QtWidgets.QLabel(
+            "Uses Clang preprocessing and AST evaluation, so integer constant expressions are supported."
+        )
+        clang_help.setWordWrap(True)
+        mode_group = QtWidgets.QButtonGroup(self)
+        mode_group.addButton(python_mode)
+        mode_group.addButton(clang_mode)
+        clang_path = QtWidgets.QLineEdit()
+        clang_path.setPlaceholderText("C:/Program Files/LLVM/bin/clang.exe")
+        clang_browse = QtWidgets.QPushButton("Browse")
+        clang_row = QtWidgets.QWidget()
+        clang_row_layout = QtWidgets.QHBoxLayout(clang_row)
+        clang_row_layout.setContentsMargins(24, 0, 0, 0)
+        clang_row_layout.addWidget(clang_path, 1)
+        clang_row_layout.addWidget(clang_browse)
+        enum_layout.addWidget(enum_enabled)
+        enum_layout.addWidget(enum_note)
+        enum_layout.addSpacing(8)
+        enum_layout.addWidget(python_mode)
+        enum_layout.addWidget(python_help)
+        enum_layout.addWidget(clang_mode)
+        enum_layout.addWidget(clang_help)
+        enum_layout.addWidget(clang_row)
+        auto_detect_groups = QtWidgets.QCheckBox("Automatically suggest groups from shared prefixes")
+
+        auto_detect_help = QtWidgets.QLabel(
+            "Finds broad and specific underscore-delimited prefix levels shared by at least two macros. "
+            "Suggestions still require explicit addition in the macro enum workspace."
+        )
+        auto_detect_help.setWordWrap(True)
+        enum_layout.addSpacing(8)
+        enum_layout.addWidget(auto_detect_groups)
+        enum_layout.addWidget(auto_detect_help)
+        enum_layout.addSpacing(8)
+        enum_layout.addStretch(1)
+        tabs.addTab(enum_tab, "Macro Enum Conversion")
+
         parser_tab = QtWidgets.QWidget()
         parser_form = QtWidgets.QFormLayout(parser_tab)
         parser_form.setFieldGrowthPolicy(QtWidgets.QFormLayout.ExpandingFieldsGrow)
@@ -226,7 +284,9 @@ Disable this if you prefer a quieter workflow and rely on the status line and lo
         logging_layout.addStretch(1)
         tabs.addTab(logging_tab, "Logging")
 
-        buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
+        buttons = QtWidgets.QDialogButtonBox()
+        buttons.addButton(DIALOG_OK)
+        buttons.addButton(DIALOG_CANCEL)
         root.addWidget(buttons)
 
         self._widgets: Dict[str, QtWidgets.QWidget] = {
@@ -236,6 +296,12 @@ Disable this if you prefer a quieter workflow and rely on the status line and lo
             "log_external_output": log_external,
             "clear_log_before_import": clear_log,
             "show_success_dialog": show_success,
+            "import_numeric_macros": enum_enabled,
+            "macro_python_mode": python_mode,
+            "macro_clang_mode": clang_mode,
+            "macro_clang_path": clang_path,
+            "macro_clang_browse": clang_browse,
+            "auto_detect_macro_groups": auto_detect_groups,
             **parser_widgets,
             **logging_widgets,
         }
@@ -250,6 +316,11 @@ Disable this if you prefer a quieter workflow and rely on the status line and lo
         log_external.setChecked(profile.log_external_output)
         clear_log.setChecked(profile.clear_log_before_import)
         show_success.setChecked(profile.show_success_dialog)
+        enum_enabled.setChecked(profile.import_numeric_macros)
+        clang_mode.setChecked(profile.macro_conversion_mode == "clang")
+        python_mode.setChecked(profile.macro_conversion_mode != "clang")
+        clang_path.setText(profile.macro_clang_path)
+        auto_detect_groups.setChecked(profile.auto_detect_macro_groups)
 
         for key, _label_text, _help_text, _placeholder in PARSER_VALUE_FIELDS:
             self._widgets[key].setText(getattr(profile, key, ""))
@@ -260,7 +331,13 @@ Disable this if you prefer a quieter workflow and rely on the status line and lo
             self._widgets[key].setChecked(getattr(profile, key, False))
 
         logging_all.toggled.connect(self._sync_logging_controls)
+        enum_enabled.toggled.connect(self._sync_enum_controls)
+        auto_detect_groups.toggled.connect(self._sync_enum_controls)
+        python_mode.toggled.connect(self._sync_enum_controls)
+        clang_mode.toggled.connect(self._sync_enum_controls)
+        clang_browse.clicked.connect(self._browse_clang)
         self._sync_logging_controls(logging_all.isChecked())
+        self._sync_enum_controls()
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
 
@@ -276,6 +353,22 @@ Disable this if you prefer a quieter workflow and rely on the status line and lo
         for key in self._logging_option_keys:
             self._widgets[key].setEnabled(not enabled)
 
+    def _sync_enum_controls(self, _checked: bool = False) -> None:
+        enabled = self._widgets["import_numeric_macros"].isChecked()
+        self._widgets["macro_python_mode"].setEnabled(enabled)
+        self._widgets["macro_clang_mode"].setEnabled(enabled)
+        self._widgets["macro_clang_path"].setEnabled(enabled and self._widgets["macro_clang_mode"].isChecked())
+        self._widgets["auto_detect_macro_groups"].setEnabled(enabled)
+
+        self._widgets["macro_clang_browse"].setEnabled(enabled and self._widgets["macro_clang_mode"].isChecked())
+
+    def _browse_clang(self) -> None:
+        path, _filter = QtWidgets.QFileDialog.getOpenFileName(
+            self, "Select Clang executable", self._widgets["macro_clang_path"].text()
+        )
+        if path:
+            self._widgets["macro_clang_path"].setText(path)
+
     def apply_to_profile(self, profile: Profile) -> Profile:
         """Write the dialog state back into the profile object."""
 
@@ -285,6 +378,10 @@ Disable this if you prefer a quieter workflow and rely on the status line and lo
         profile.log_external_output = self._widgets["log_external_output"].isChecked()
         profile.clear_log_before_import = self._widgets["clear_log_before_import"].isChecked()
         profile.show_success_dialog = self._widgets["show_success_dialog"].isChecked()
+        profile.import_numeric_macros = self._widgets["import_numeric_macros"].isChecked()
+        profile.macro_conversion_mode = "clang" if self._widgets["macro_clang_mode"].isChecked() else "python"
+        profile.macro_clang_path = self._widgets["macro_clang_path"].text().strip()
+        profile.auto_detect_macro_groups = self._widgets["auto_detect_macro_groups"].isChecked()
 
         for key, _label_text, _help_text, _placeholder in PARSER_VALUE_FIELDS:
             profile.__dict__[key] = self._widgets[key].text().strip()

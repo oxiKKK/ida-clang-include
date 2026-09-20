@@ -10,8 +10,20 @@ from .config import PLUGIN_NAME
 
 if idaapi.IDA_SDK_VERSION >= 920:
     from PySide6 import QtCore, QtGui, QtWidgets
+
+    ALIGN_COUNT = QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter
+    DIALOG_CANCEL = QtWidgets.QDialogButtonBox.StandardButton.Cancel
+    DIALOG_OK = QtWidgets.QDialogButtonBox.StandardButton.Ok
+    HORIZONTAL = QtCore.Qt.Orientation.Horizontal
+    USER_ROLE = QtCore.Qt.ItemDataRole.UserRole
 else:
     from PyQt5 import QtCore, QtGui, QtWidgets
+
+    ALIGN_COUNT = QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter
+    DIALOG_CANCEL = QtWidgets.QDialogButtonBox.Cancel
+    DIALOG_OK = QtWidgets.QDialogButtonBox.Ok
+    HORIZONTAL = QtCore.Qt.Horizontal
+    USER_ROLE = QtCore.Qt.UserRole
 
 
 class SyncDiffDialog(QtWidgets.QDialog):
@@ -75,13 +87,13 @@ class SyncDiffDialog(QtWidgets.QDialog):
         self._search_edit = QtWidgets.QLineEdit()
         self._search_edit.setPlaceholderText("Filter by type name or reason")
         self._visible_count = QtWidgets.QLabel()
-        self._visible_count.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+        self._visible_count.setAlignment(ALIGN_COUNT)
         controls.addWidget(filter_label)
         controls.addWidget(self._filter_combo)
         controls.addWidget(self._search_edit, 1)
         controls.addWidget(self._visible_count)
 
-        splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
+        splitter = QtWidgets.QSplitter(HORIZONTAL)
         splitter.setChildrenCollapsible(False)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
@@ -114,9 +126,11 @@ class SyncDiffDialog(QtWidgets.QDialog):
         splitter.addWidget(left_panel)
         splitter.addWidget(right_panel)
 
-        buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
-        buttons.button(QtWidgets.QDialogButtonBox.Ok).setText("Apply Changes")
-        buttons.button(QtWidgets.QDialogButtonBox.Cancel).setText("Cancel")
+        buttons = QtWidgets.QDialogButtonBox()
+        buttons.addButton(DIALOG_OK)
+        buttons.addButton(DIALOG_CANCEL)
+        buttons.button(DIALOG_OK).setText("Apply Changes")
+        buttons.button(DIALOG_CANCEL).setText("Cancel")
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
 
@@ -158,7 +172,7 @@ class SyncDiffDialog(QtWidgets.QDialog):
         self._change_list.clear()
         for change in self._filtered_changes:
             item = QtWidgets.QListWidgetItem(self._list_text(change))
-            item.setData(QtCore.Qt.UserRole, change)
+            item.setData(USER_ROLE, change)
             item.setToolTip(change.reason or self.ACTION_LABELS[change.action])
             self._change_list.addItem(item)
         self._change_list.blockSignals(False)
