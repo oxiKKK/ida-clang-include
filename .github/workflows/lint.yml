@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -20,6 +23,8 @@ jobs:
         run: uv tool run ruff format --check .
 
       - name: Install hcli
+        env:
+          HCLI_GITHUB_TOKEN: ${{ github.token }}
         run: curl -LsSf https://hcli.docs.hex-rays.com/install | sh
 
       - name: hcli plugin lint

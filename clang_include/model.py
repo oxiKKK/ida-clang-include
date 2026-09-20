@@ -2,10 +2,12 @@
 
 import json
 from dataclasses import asdict, dataclass
-from typing import List
+from typing import Dict, List
 
 import ida_kernwin
 import ida_netnode
+
+from .macro_grouping import migrate_group_rules
 
 from .config import (
     DEFAULT_IDACLANG,
@@ -54,7 +56,13 @@ class Profile:
     delete_missing_managed_types: bool = False
     clear_log_before_import: bool = True
     show_success_dialog: bool = True
+    import_numeric_macros: bool = False
+    macro_conversion_mode: str = "python"
+    macro_clang_path: str = ""
+    macro_enum_definitions: List[dict] = None
+    auto_detect_macro_groups: bool = False
     managed_type_names: List[str] = None
+    managed_macro_enums: Dict[str, dict] = None
     last_engine_used: str = ""
 
     def __post_init__(self) -> None:
@@ -64,8 +72,12 @@ class Profile:
             self.include_paths = []
         if self.macros is None:
             self.macros = []
+        if self.macro_enum_definitions is None:
+            self.macro_enum_definitions = []
         if self.managed_type_names is None:
             self.managed_type_names = []
+        if self.managed_macro_enums is None:
+            self.managed_macro_enums = {}
 
     @classmethod
     def from_dict(cls, data: dict) -> "Profile":
@@ -81,6 +93,9 @@ class Profile:
         # "use raw". Promote that implicit signal to the explicit field.
         if "input_mode" not in data and merged.raw_argv.strip():
             merged.input_mode = "raw"
+        legacy_rules = data.get("macro_group_rules", [])
+        if not merged.macro_enum_definitions and isinstance(legacy_rules, list):
+            merged.macro_enum_definitions = migrate_group_rules(legacy_rules)
         return merged
 
 

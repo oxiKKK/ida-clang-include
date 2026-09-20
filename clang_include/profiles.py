@@ -11,7 +11,7 @@ from .model import Profile
 # Fields owned by a specific IDB rather than by the cross-IDB configuration.
 # These are excluded when serializing a global profile and preserved on the
 # current IDB when one is loaded.
-PER_IDB_RUNTIME_FIELDS = ("managed_type_names", "last_engine_used")
+PER_IDB_RUNTIME_FIELDS = ("managed_type_names", "managed_macro_enums", "last_engine_used")
 
 
 def _global_profiles_dir() -> Path:
